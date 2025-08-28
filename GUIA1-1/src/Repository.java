@@ -73,11 +73,11 @@ public class Repository {
 
     public static void main(String[] args) {
         // Rutas
-        String master = "C:/Users/julia/Desktop/SistDistribuidos/RepoMaster";
+        String master = "C:/path";
         List<String> replicas = List.of(
-                "C:/Users/julia/Desktop/SistDistribuidos/Replica1",
-                "C:/Users/julia/Desktop/SistDistribuidos/Replica2",
-                "C:/Users/julia/Desktop/SistDistribuidos/Replica3"
+                "C:/path",
+                "C:/path",
+                "C:/path"
         );
 
         FolderSynchronizer synchronizer = new FolderSynchronizer(master, replicas);
