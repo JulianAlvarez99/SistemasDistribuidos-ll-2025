@@ -7,13 +7,13 @@ import java.util.List;
 import java.util.Timer;
 import java.util.TimerTask;
 
-class RepositoryUpdater {
+class RepositoryUIUpdater {
     private final FileRepositoryService service;
     private final FileTableModel tableModel;
     private final JLabel updateLabel;
     private Timer timer;
 
-    public RepositoryUpdater(FileRepositoryService service, FileTableModel tableModel, JLabel updateLabel) {
+    public RepositoryUIUpdater(FileRepositoryService service, FileTableModel tableModel, JLabel updateLabel) {
         this.service = service;
         this.tableModel = tableModel;
         this.updateLabel = updateLabel;
@@ -34,7 +34,7 @@ class RepositoryUpdater {
                             new SimpleDateFormat("dd/MM/yyyy HH:mm:ss").format(new Date()));
                 });
             }
-        }, 0, 5000);
+        }, 500, 3000);
     }
 }
 
@@ -50,13 +50,13 @@ public class Repository {
 
     private FileRepositoryService repositoryService;
     private FileTableModel tableModel;
-    private RepositoryUpdater updater;
+    private RepositoryUIUpdater updater;
 
     public Repository() {
         repositoryService = new FileRepositoryService();
         tableModel = new FileTableModel();
         dirTable.setModel(tableModel);
-        updater = new RepositoryUpdater(repositoryService, tableModel, updateLabel);
+        updater = new RepositoryUIUpdater(repositoryService, tableModel, updateLabel);
 
         startBtn.addActionListener(new ActionListener() {
             @Override
@@ -72,6 +72,23 @@ public class Repository {
     }
 
     public static void main(String[] args) {
+        // Rutas
+        String master = "C:/Users/julia/Desktop/SistDistribuidos/RepoMaster";
+        List<String> replicas = List.of(
+                "C:/Users/julia/Desktop/SistDistribuidos/Replica1",
+                "C:/Users/julia/Desktop/SistDistribuidos/Replica2",
+                "C:/Users/julia/Desktop/SistDistribuidos/Replica3"
+        );
+
+        FolderSynchronizer synchronizer = new FolderSynchronizer(master, replicas);
+
+        // a) Consistencia estricta (cambios en tiempo real)
+//        synchronizer.startStrictConsistency();
+
+        // b) Consistencia continua (cada 7.5 segundos)
+         synchronizer.startContinuousConsistency(7500);
+
+        // Lanzar UI
         JFrame frame = new JFrame("File Repository");
         frame.setContentPane(new Repository().mainPanel);
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
@@ -79,4 +96,5 @@ public class Repository {
         frame.setLocationRelativeTo(null);
         frame.setVisible(true);
     }
+
 }
