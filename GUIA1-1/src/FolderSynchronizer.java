@@ -6,11 +6,83 @@ import java.util.*;
 public class FolderSynchronizer {
     private final Path masterPath;
     private final List<Path> replicas;
+    private final Map<String, Boolean> invalidationMap = new HashMap<>();
 
     public FolderSynchronizer(String masterDir, List<String> replicaDirs) {
         this.masterPath = Paths.get(masterDir);
         this.replicas = replicaDirs.stream().map(Paths::get).toList();
+        initializeState();
     }
+
+    // Al inicio, se asume que todo lo que hay en Master está válido
+    private void initializeState() {
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(masterPath)) {
+            for (Path file : stream) {
+                if (Files.isRegularFile(file)) {
+                    invalidationMap.put(file.getFileName().toString(), false);
+                }
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    // Arranca el proceso de invalidación basado en eventos
+    public void startInvalidation() {
+        new Thread(() -> {
+            try {
+                WatchService watchService = FileSystems.getDefault().newWatchService();
+                masterPath.register(
+                        watchService,
+                        StandardWatchEventKinds.ENTRY_CREATE,
+                        StandardWatchEventKinds.ENTRY_MODIFY,
+                        StandardWatchEventKinds.ENTRY_DELETE
+                );
+
+                while (true) {
+                    WatchKey key = watchService.take();
+                    for (WatchEvent<?> event : key.pollEvents()) {
+                        Path changed = masterPath.resolve((Path) event.context());
+                        String fileName = changed.getFileName().toString();
+
+                        if (event.kind() == StandardWatchEventKinds.ENTRY_DELETE) {
+                            // Eliminación: propagar y sacar del mapa
+                            deleteFileFromReplicas(fileName);
+                            invalidationMap.remove(fileName);
+                        } else {
+                            // Creación o modificación: marcar como inválido
+                            invalidationMap.put(fileName, true);
+                            System.out.println("[INVALIDACIÓN] Archivo " + fileName + " marcado como inválido.");
+                        }
+                    }
+                    key.reset();
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }).start();
+    }
+
+    /**
+     * Cuando una réplica accede a un archivo, primero pregunta acá.
+     * Si está inválido, se actualiza bajo demanda desde Master.
+     */
+    public void fetchIfInvalid(String fileName, Path replicaPath) {
+        Boolean invalid = invalidationMap.get(fileName);
+
+        if (invalid != null && invalid) {
+            Path source = masterPath.resolve(fileName);
+            Path target = replicaPath.resolve(fileName);
+            try {
+                Files.copy(source, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.COPY_ATTRIBUTES);
+                invalidationMap.put(fileName, false);
+                System.out.println("[SYNC] Archivo " + fileName + " transferido bajo demanda a " + replicaPath);
+            } catch (IOException e) {
+                System.err.println("[SYNC][ERROR] No se pudo copiar " + fileName + ": " + e.getMessage());
+            }
+        }
+    }
+
 
     // ------------------------------
     // Consistencia estricta (WatchService)
