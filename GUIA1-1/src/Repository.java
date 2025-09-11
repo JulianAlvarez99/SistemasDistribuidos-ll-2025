@@ -3,9 +3,6 @@ import javax.swing.event.MouseInputAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.text.SimpleDateFormat;
@@ -67,6 +64,7 @@ public class Repository {
     private final FileTableModel tableModel;
     private final RepositoryUIUpdater updater;
     private final FolderSynchronizer synchronizer;
+    private CacheManager cacheManager; // 🚀 Integración
 
     public Repository(FolderSynchronizer synchronizer) {
         this.synchronizer = synchronizer;
@@ -76,7 +74,7 @@ public class Repository {
 
         dirTable.setModel(tableModel);
 
-        // Acción del botón "Iniciar" (usa lo que haya en pathField)
+        // Acción del botón "Iniciar"
         startBtn.addActionListener(e -> {
             String newPath = pathField.getText().trim();
             if (newPath.isEmpty()) {
@@ -88,7 +86,6 @@ public class Repository {
             Path requestedPath = Paths.get(newPath).toAbsolutePath().normalize();
 
             if (requestedPath.equals(masterPath)) {
-                // Mostrar directamente el master en la UI
                 JOptionPane.showMessageDialog(mainPanel, "Mostrando contenido del master.", "Info", JOptionPane.INFORMATION_MESSAGE);
                 updater.start(newPath);
                 return;
@@ -98,12 +95,17 @@ public class Repository {
             if (ok) {
                 JOptionPane.showMessageDialog(mainPanel, "Réplica añadida y sincronizada con master.", "Info", JOptionPane.INFORMATION_MESSAGE);
                 updater.start(newPath);
+
+                // 🚀 inicializar cache con carpeta dedicada
+                String cacheDir = newPath + "_cache";
+                cacheManager = new CacheManager(cacheDir, 120 ,synchronizer, mainPanel);
+                System.out.println("[CACHE] CacheManager inicializado en: " + cacheDir);
             } else {
                 JOptionPane.showMessageDialog(mainPanel, "No se pudo añadir la réplica (ver consola).", "Error", JOptionPane.ERROR_MESSAGE);
             }
         });
 
-        // Listener de doble click sobre la tabla - abre el archivo desde la ruta actual en pathField
+        // Listener de doble click sobre la tabla
         dirTable.addMouseListener(new MouseInputAdapter() {
             @Override
             public void mouseClicked(MouseEvent e) {
@@ -117,70 +119,29 @@ public class Repository {
                     }
                     Path folderPath = Path.of(folder);
 
-                    // 1) Intentar revalidar si hace falta (accessFile maneja tanto name.txt como name_invalid.txt)
-                    synchronizer.accessFile(folderPath, fileName);
-
-                    // 2) Determinar qué archivo abrir: preferir el nombre original ya revalidado
-                    String originalName = synchronizer.stripInvalidSuffix(fileName);
-                    Path originalPath = folderPath.resolve(originalName);
-                    if(fileName.toLowerCase().endsWith(".txt")){
-                        try {
-                            if (Files.exists(originalPath)) {
-                                String content = Files.readString(originalPath, StandardCharsets.UTF_8);
-                                showTextFileDialog(originalName, content);
-                            } else {
-                                // si no existe la versión original, intentar abrir la copia inválida (si existe)
-                                Path invalidCopy = folderPath.resolve(synchronizer.appendInvalidSuffix(originalName));
-                                if (Files.exists(invalidCopy)) {
-                                    String content = Files.readString(invalidCopy, StandardCharsets.UTF_8);
-                                    showTextFileDialog(invalidCopy.getFileName().toString(), content);
-                                } else {
-                                    JOptionPane.showMessageDialog(mainPanel, "El archivo no existe (ni versión válida ni inválida).", "Información", JOptionPane.INFORMATION_MESSAGE);
-                                }
-                            }
-                        } catch (IOException ex) {
-                            JOptionPane.showMessageDialog(mainPanel, "Error al leer el archivo: " + ex.getMessage(),
-                                    "Error", JOptionPane.ERROR_MESSAGE);
-                        }
+                    if (cacheManager != null && fileName.toLowerCase().endsWith(".txt")) {
+                        // 🚀 toda la lógica de revalidación + apertura via cache
+                        cacheManager.openFileWithCache(folderPath, fileName);
                     } else {
-                            JOptionPane.showMessageDialog(mainPanel, "Solo se pueden abrir archivos .txt",
-                                    "Información", JOptionPane.INFORMATION_MESSAGE);
+                        JOptionPane.showMessageDialog(mainPanel, "Solo se pueden abrir archivos .txt",
+                                "Información", JOptionPane.INFORMATION_MESSAGE);
                     }
                 }
             }
         });
     }
 
-    private void showTextFileDialog(String fileName, String content) {
-        JDialog dialog = new JDialog((JFrame) SwingUtilities.getWindowAncestor(mainPanel), "Contenido de " + fileName, true);
-        JTextArea textArea = new JTextArea(content);
-        textArea.setEditable(false);
-        dialog.add(new JScrollPane(textArea));
-        dialog.setSize(600, 400);
-        dialog.setLocationRelativeTo(mainPanel);
-        dialog.setVisible(true);
-    }
-
-    /**
-     * Llamar desde el main al cerrar la ventana para detener timers/hilos del updater.
-     */
     public void shutdown() {
         updater.stop();
-        // Si añadiste stop en FolderSynchronizer, aquí lo llamas:
-//         synchronizer.stopContinuousConsistency();
-//         synchronizer.stopStrictConsistency();
     }
 
     public static void main(String[] args) {
-        // Rutas por defecto (puedes mantenerlas como ejemplo)
         String master = "C:/Users/julia/Desktop/SistDistribuidos/RepoMaster";
         List<String> replicas = List.of();
 
         FolderSynchronizer synchronizer = new FolderSynchronizer(master, replicas);
-//        synchronizer.startContinuousConsistency(8000);
         synchronizer.startInvalidation(8000);
 
-        // Lanzar UI
         JFrame frame = new JFrame("File Repository");
         Repository repoUI = new Repository(synchronizer);
         frame.setContentPane(repoUI.mainPanel);
@@ -188,7 +149,6 @@ public class Repository {
         frame.setSize(700, 500);
         frame.setLocationRelativeTo(null);
 
-        // Shutdown hook: cuando la ventana se cierra, detener timers/monitores limpias
         frame.addWindowListener(new WindowAdapter() {
             @Override
             public void windowClosing(WindowEvent e) {
