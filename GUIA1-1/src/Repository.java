@@ -1,9 +1,13 @@
 import javax.swing.*;
 import javax.swing.event.MouseInputAdapter;
 import java.awt.event.MouseEvent;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.List;
@@ -22,7 +26,7 @@ class RepositoryUIUpdater {
         this.updateLabel = updateLabel;
     }
 
-    public void start(String path) {
+    public synchronized void start(String path) {
         if (timer != null) {
             timer.cancel();
         }
@@ -39,10 +43,18 @@ class RepositoryUIUpdater {
             }
         }, 500, 3000);
     }
+
+    public synchronized void stop() {
+        if (timer != null) {
+            timer.cancel();
+            timer = null;
+            SwingUtilities.invokeLater(() -> updateLabel.setText("Monitor detenido"));
+        }
+    }
 }
 
 public class Repository {
-    private JPanel mainPanel;
+    public JPanel mainPanel;
     private JLabel repoLabel;
     private JTextField pathField;
     private JButton startBtn;
@@ -51,28 +63,47 @@ public class Repository {
     private JPanel configPanel;
     private JScrollPane scrollPane;
 
-    private FileRepositoryService repositoryService;
-    private FileTableModel tableModel;
-    private RepositoryUIUpdater updater;
-    private FolderSynchronizer synchronizer;
+    private final FileRepositoryService repositoryService;
+    private final FileTableModel tableModel;
+    private final RepositoryUIUpdater updater;
+    private final FolderSynchronizer synchronizer;
 
     public Repository(FolderSynchronizer synchronizer) {
-        repositoryService = new FileRepositoryService();
-        tableModel = new FileTableModel();
-        dirTable.setModel(tableModel);
-        updater = new RepositoryUIUpdater(repositoryService, tableModel, updateLabel);
+        this.synchronizer = synchronizer;
+        this.repositoryService = new FileRepositoryService();
+        this.tableModel = new FileTableModel();
+        this.updater = new RepositoryUIUpdater(repositoryService, tableModel, updateLabel);
 
-        // Acción del botón "Iniciar"
+        dirTable.setModel(tableModel);
+
+        // Acción del botón "Iniciar" (usa lo que haya en pathField)
         startBtn.addActionListener(e -> {
-            String path = pathField.getText().trim();
-            if (!path.isEmpty()) {
-                updater.start(path);
+            String newPath = pathField.getText().trim();
+            if (newPath.isEmpty()) {
+                JOptionPane.showMessageDialog(mainPanel, "Ingrese la ruta en el campo path.", "Error", JOptionPane.ERROR_MESSAGE);
+                return;
+            }
+
+            Path masterPath = synchronizer.getMasterPath().toAbsolutePath().normalize();
+            Path requestedPath = Paths.get(newPath).toAbsolutePath().normalize();
+
+            if (requestedPath.equals(masterPath)) {
+                // Mostrar directamente el master en la UI
+                JOptionPane.showMessageDialog(mainPanel, "Mostrando contenido del master.", "Info", JOptionPane.INFORMATION_MESSAGE);
+                updater.start(newPath);
+                return;
+            }
+
+            boolean ok = synchronizer.addReplica(newPath);
+            if (ok) {
+                JOptionPane.showMessageDialog(mainPanel, "Réplica añadida y sincronizada con master.", "Info", JOptionPane.INFORMATION_MESSAGE);
+                updater.start(newPath);
             } else {
-                JOptionPane.showMessageDialog(mainPanel, "Ingrese un directorio válido.", "Error", JOptionPane.ERROR_MESSAGE);
+                JOptionPane.showMessageDialog(mainPanel, "No se pudo añadir la réplica (ver consola).", "Error", JOptionPane.ERROR_MESSAGE);
             }
         });
 
-        // Listener de doble click sobre la tabla
+        // Listener de doble click sobre la tabla - abre el archivo desde la ruta actual en pathField
         dirTable.addMouseListener(new MouseInputAdapter() {
             @Override
             public void mouseClicked(MouseEvent e) {
@@ -80,26 +111,40 @@ public class Repository {
                     int row = dirTable.getSelectedRow();
                     String fileName = (String) tableModel.getValueAt(row, 0);
                     String folder = pathField.getText().trim();
-                    Path filePath = Path.of(folder, fileName);
+                    if (folder.isEmpty()) {
+                        JOptionPane.showMessageDialog(mainPanel, "Defina el directorio en el campo 'path'.", "Error", JOptionPane.ERROR_MESSAGE);
+                        return;
+                    }
+                    Path folderPath = Path.of(folder);
 
-                    if (fileName.toLowerCase().endsWith(".txt")) {
+                    // 1) Intentar revalidar si hace falta (accessFile maneja tanto name.txt como name_invalid.txt)
+                    synchronizer.accessFile(folderPath, fileName);
+
+                    // 2) Determinar qué archivo abrir: preferir el nombre original ya revalidado
+                    String originalName = synchronizer.stripInvalidSuffix(fileName);
+                    Path originalPath = folderPath.resolve(originalName);
+                    if(fileName.toLowerCase().endsWith(".txt")){
                         try {
-                            // ---- NUEVO: sincronización bajo demanda ----
-                            // Determinar la réplica correspondiente
-                            Path replicaPath = Path.of(folder);
-                            synchronizer.fetchIfInvalid(fileName, replicaPath);
-                            // -------------------------------------------
-
-                            // Leer el archivo ya actualizado
-                            String content = Files.readString(filePath);
-                            showTextFileDialog(fileName, content);
+                            if (Files.exists(originalPath)) {
+                                String content = Files.readString(originalPath, StandardCharsets.UTF_8);
+                                showTextFileDialog(originalName, content);
+                            } else {
+                                // si no existe la versión original, intentar abrir la copia inválida (si existe)
+                                Path invalidCopy = folderPath.resolve(synchronizer.appendInvalidSuffix(originalName));
+                                if (Files.exists(invalidCopy)) {
+                                    String content = Files.readString(invalidCopy, StandardCharsets.UTF_8);
+                                    showTextFileDialog(invalidCopy.getFileName().toString(), content);
+                                } else {
+                                    JOptionPane.showMessageDialog(mainPanel, "El archivo no existe (ni versión válida ni inválida).", "Información", JOptionPane.INFORMATION_MESSAGE);
+                                }
+                            }
                         } catch (IOException ex) {
                             JOptionPane.showMessageDialog(mainPanel, "Error al leer el archivo: " + ex.getMessage(),
                                     "Error", JOptionPane.ERROR_MESSAGE);
                         }
                     } else {
-                        JOptionPane.showMessageDialog(mainPanel, "Solo se pueden abrir archivos .txt",
-                                "Información", JOptionPane.INFORMATION_MESSAGE);
+                            JOptionPane.showMessageDialog(mainPanel, "Solo se pueden abrir archivos .txt",
+                                    "Información", JOptionPane.INFORMATION_MESSAGE);
                     }
                 }
             }
@@ -116,33 +161,46 @@ public class Repository {
         dialog.setVisible(true);
     }
 
+    /**
+     * Llamar desde el main al cerrar la ventana para detener timers/hilos del updater.
+     */
+    public void shutdown() {
+        updater.stop();
+        // Si añadiste stop en FolderSynchronizer, aquí lo llamas:
+//         synchronizer.stopContinuousConsistency();
+//         synchronizer.stopStrictConsistency();
+    }
+
     public static void main(String[] args) {
-        // Rutas
+        // Rutas por defecto (puedes mantenerlas como ejemplo)
         String master = "C:/Users/julia/Desktop/SistDistribuidos/RepoMaster";
-        List<String> replicas = List.of(
-                "C:/Users/julia/Desktop/SistDistribuidos/Replica1",
-                "C:/Users/julia/Desktop/SistDistribuidos/Replica2",
-                "C:/Users/julia/Desktop/SistDistribuidos/Replica3"
-        );
+        List<String> replicas = List.of();
 
         FolderSynchronizer synchronizer = new FolderSynchronizer(master, replicas);
-
-        // a) Consistencia estricta (cambios en tiempo real)
-//        synchronizer.startStrictConsistency();
-
-        // b) Consistencia continua (cada 7.5 segundos)
-//         synchronizer.startContinuousConsistency(7500);
-
-         //c) Modelo de invalidacion
-        synchronizer.startInvalidation();
+//        synchronizer.startContinuousConsistency(8000);
+        synchronizer.startInvalidation(8000);
 
         // Lanzar UI
         JFrame frame = new JFrame("File Repository");
-        frame.setContentPane(new Repository(synchronizer).mainPanel);
-        frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        frame.setSize(600, 400);
+        Repository repoUI = new Repository(synchronizer);
+        frame.setContentPane(repoUI.mainPanel);
+        frame.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
+        frame.setSize(700, 500);
         frame.setLocationRelativeTo(null);
+
+        // Shutdown hook: cuando la ventana se cierra, detener timers/monitores limpias
+        frame.addWindowListener(new WindowAdapter() {
+            @Override
+            public void windowClosing(WindowEvent e) {
+                repoUI.shutdown();
+            }
+
+            @Override
+            public void windowClosed(WindowEvent e) {
+                repoUI.shutdown();
+            }
+        });
+
         frame.setVisible(true);
     }
-
 }
