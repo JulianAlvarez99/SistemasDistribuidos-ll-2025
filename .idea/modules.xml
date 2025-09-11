@@ -3,6 +3,7 @@
   <component name="ProjectModuleManager">
     <modules>
       <module fileurl="file://$PROJECT_DIR$/GUIA1-1/GUIA1-1.iml" filepath="$PROJECT_DIR$/GUIA1-1/GUIA1-1.iml" />
+      <module fileurl="file://$PROJECT_DIR$/GUIA1-3/GUIA1-3.iml" filepath="$PROJECT_DIR$/GUIA1-3/GUIA1-3.iml" />
       <module fileurl="file://$PROJECT_DIR$/.idea/SistemasDistribuidos-ll-2025.iml" filepath="$PROJECT_DIR$/.idea/SistemasDistribuidos-ll-2025.iml" />
     </modules>
   </component>
