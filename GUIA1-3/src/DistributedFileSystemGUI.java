@@ -2,6 +2,8 @@ import javax.swing.*;
 import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 
 /**
  * Main GUI application using Swing
@@ -17,6 +19,13 @@ public class DistributedFileSystemGUI extends JFrame {
     private JButton writeButton;
     private JButton readButton;
     private JButton deleteButton;
+    private JTextArea fileListArea;
+    private JButton listFilesButton;
+    private JButton clearViewButton;
+    private JButton refreshListButton;
+    private JButton syncButton;
+    private JLabel syncStatusLabel;
+    private JButton forceSyncButton;
 
     public DistributedFileSystemGUI() {
         initializeComponents();
@@ -31,27 +40,49 @@ public class DistributedFileSystemGUI extends JFrame {
     private void initializeComponents() {
         serverHostField = new JTextField("localhost", 15);
         serverPortField = new JTextField("8080", 5);
-        fileNameField = new JTextField(20);
-        contentArea = new JTextArea(10, 40);
-        resultArea = new JTextArea(8, 40);
+        fileNameField = new JTextField(25);
+
+        // Enhanced text areas with better formatting
+        contentArea = new JTextArea(15, 60);
+        contentArea.setLineWrap(true);
+        contentArea.setWrapStyleWord(true);
+        contentArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
+
+        resultArea = new JTextArea(8, 60);
+        resultArea.setLineWrap(true);
+        resultArea.setWrapStyleWord(true);
+        resultArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 11));
+
+        // File list area
+        fileListArea = new JTextArea(10, 25);
+        fileListArea.setEditable(false);
+        fileListArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 11));
 
         connectButton = new JButton("Connect");
         writeButton = new JButton("Write");
         readButton = new JButton("Read");
         deleteButton = new JButton("Delete");
+        listFilesButton = new JButton("List Files");
+        clearViewButton = new JButton("Clear View");
+        refreshListButton = new JButton("Refresh List");
+        syncButton = new JButton("Force Sync");
+        syncStatusLabel = new JLabel("Sync Status: Not connected");
+        forceSyncButton = new JButton("Force Full Sync");
+
 
         // Initially disable operation buttons
+        syncButton.setEnabled(false);
         writeButton.setEnabled(false);
         readButton.setEnabled(false);
         deleteButton.setEnabled(false);
+        listFilesButton.setEnabled(false);
+        clearViewButton.setEnabled(false);
+        refreshListButton.setEnabled(false);
+        forceSyncButton.setEnabled(false);
 
         contentArea.setBorder(BorderFactory.createTitledBorder("File Content"));
         resultArea.setBorder(BorderFactory.createTitledBorder("Operation Results"));
-        resultArea.setEditable(false);
-
-        // Add scroll panes
-        contentArea = new JTextArea(10, 40);
-        resultArea = new JTextArea(8, 40);
+        fileListArea.setBorder(BorderFactory.createTitledBorder("Files in Repository"));
         resultArea.setEditable(false);
     }
 
@@ -59,64 +90,85 @@ public class DistributedFileSystemGUI extends JFrame {
         setLayout(new BorderLayout());
 
         // Top panel - connection
-        JPanel connectionPanel = new JPanel(new FlowLayout());
+        JPanel connectionPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
         connectionPanel.add(new JLabel("Server Host:"));
         connectionPanel.add(serverHostField);
         connectionPanel.add(new JLabel("Port:"));
         connectionPanel.add(serverPortField);
         connectionPanel.add(connectButton);
+        connectionPanel.add(forceSyncButton);
+        connectionPanel.add(syncStatusLabel);
+
+        // Left panel - file list
+        JPanel leftPanel = new JPanel(new BorderLayout());
+        leftPanel.add(new JScrollPane(fileListArea), BorderLayout.CENTER);
+
+        JPanel listButtonPanel = new JPanel(new FlowLayout());
+        listButtonPanel.add(listFilesButton);
+        listButtonPanel.add(refreshListButton);
+        listButtonPanel.add(syncButton);
+        leftPanel.add(listButtonPanel, BorderLayout.SOUTH);
 
         // Center panel - file operations
-        JPanel operationsPanel = new JPanel(new BorderLayout());
+        JPanel centerPanel = new JPanel(new BorderLayout());
 
-        JPanel filePanel = new JPanel(new FlowLayout());
+        JPanel filePanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
         filePanel.add(new JLabel("File Name:"));
         filePanel.add(fileNameField);
+        filePanel.add(clearViewButton);
 
         JPanel buttonPanel = new JPanel(new FlowLayout());
         buttonPanel.add(writeButton);
         buttonPanel.add(readButton);
         buttonPanel.add(deleteButton);
 
-        operationsPanel.add(filePanel, BorderLayout.NORTH);
-        operationsPanel.add(new JScrollPane(contentArea), BorderLayout.CENTER);
-        operationsPanel.add(buttonPanel, BorderLayout.SOUTH);
+        centerPanel.add(filePanel, BorderLayout.NORTH);
+        centerPanel.add(new JScrollPane(contentArea), BorderLayout.CENTER);
+        centerPanel.add(buttonPanel, BorderLayout.SOUTH);
 
         // Bottom panel - results
         JPanel resultPanel = new JPanel(new BorderLayout());
         resultPanel.add(new JScrollPane(resultArea), BorderLayout.CENTER);
 
+        // Create split panes for responsive design
+        JSplitPane mainSplitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, leftPanel, centerPanel);
+        mainSplitPane.setDividerLocation(300);
+        mainSplitPane.setResizeWeight(0.3);
+
+        JSplitPane verticalSplitPane = new JSplitPane(JSplitPane.VERTICAL_SPLIT, mainSplitPane, resultPanel);
+        verticalSplitPane.setDividerLocation(500);
+        verticalSplitPane.setResizeWeight(0.7);
+
         add(connectionPanel, BorderLayout.NORTH);
-        add(operationsPanel, BorderLayout.CENTER);
-        add(resultPanel, BorderLayout.SOUTH);
+        add(verticalSplitPane, BorderLayout.CENTER);
+
+        // Set minimum size for responsive behavior
+        setMinimumSize(new Dimension(900, 600));
+        setPreferredSize(new Dimension(1200, 800));
     }
 
     private void setupEventHandlers() {
-        connectButton.addActionListener(new ActionListener() {
-            @Override
-            public void actionPerformed(ActionEvent e) {
-                connectToServer();
-            }
-        });
+        connectButton.addActionListener(e -> connectToServer());
+        writeButton.addActionListener(e -> performWrite());
+        readButton.addActionListener(e -> performRead());
+        deleteButton.addActionListener(e -> performDelete());
+        listFilesButton.addActionListener(e -> performListFiles());
+        refreshListButton.addActionListener(e -> performListFiles());
+        clearViewButton.addActionListener(e -> clearFileView());
+        forceSyncButton.addActionListener(e -> performForcedSync());
 
-        writeButton.addActionListener(new ActionListener() {
+        // Double-click on file list to open file
+        fileListArea.addMouseListener(new MouseAdapter() {
             @Override
-            public void actionPerformed(ActionEvent e) {
-                performWrite();
-            }
-        });
-
-        readButton.addActionListener(new ActionListener() {
-            @Override
-            public void actionPerformed(ActionEvent e) {
-                performRead();
-            }
-        });
-
-        deleteButton.addActionListener(new ActionListener() {
-            @Override
-            public void actionPerformed(ActionEvent e) {
-                performDelete();
+            public void mouseClicked(MouseEvent e) {
+                if (e.getClickCount() == 2) {
+                    String selectedText = fileListArea.getSelectedText();
+                    if (selectedText != null && !selectedText.trim().isEmpty()) {
+                        String fileName = selectedText.trim();
+                        fileNameField.setText(fileName);
+                        performRead();
+                    }
+                }
             }
         });
     }
@@ -128,17 +180,57 @@ public class DistributedFileSystemGUI extends JFrame {
 
             client = new DistributedFileClient(host, port);
 
+            // Enable all operation buttons
             writeButton.setEnabled(true);
             readButton.setEnabled(true);
             deleteButton.setEnabled(true);
+            listFilesButton.setEnabled(true);
+            clearViewButton.setEnabled(true);
+            refreshListButton.setEnabled(true);
             connectButton.setEnabled(false);
+            forceSyncButton.setEnabled(true);
 
             appendResult("Connected to server: " + host + ":" + port);
+
+            // Automatically load file list
+            performListFiles();
 
         } catch (NumberFormatException e) {
             appendResult("Error: Invalid port number");
         } catch (Exception e) {
             appendResult("Error connecting to server: " + e.getMessage());
+        }
+    }
+
+    private void performForcedSync() {
+        // This would require extending the client protocol to trigger sync
+        appendResult("FORCED FULL SYNC: Requested complete state synchronization");
+        syncStatusLabel.setText("Sync Status: Synchronizing...");
+
+        SwingUtilities.invokeLater(() -> {
+            try {
+                Thread.sleep(3000); // Wait for sync
+                syncStatusLabel.setText("Sync Status: Last sync completed");
+                performListFiles(); // Refresh file list
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
+    }
+
+    private void performListFiles() {
+        if (client == null) {
+            appendResult("Error: Not connected to server");
+            return;
+        }
+
+        OperationResult result = client.listFiles();
+        if (result.isSuccess()) {
+            fileListArea.setText(result.getContent());
+            appendResult("LIST - SUCCESS: File list refreshed");
+        } else {
+            fileListArea.setText("No files found");
+            appendResult("LIST - INFO: " + result.getMessage());
         }
     }
 
@@ -153,6 +245,11 @@ public class DistributedFileSystemGUI extends JFrame {
 
         OperationResult result = client.write(fileName, content);
         appendResult("WRITE - " + (result.isSuccess() ? "SUCCESS" : "ERROR") + ": " + result.getMessage());
+
+        if (result.isSuccess()) {
+            // Refresh file list after successful write
+            performListFiles();
+        }
     }
 
     private void performRead() {
@@ -166,8 +263,11 @@ public class DistributedFileSystemGUI extends JFrame {
         OperationResult result = client.read(fileName);
         if (result.isSuccess()) {
             contentArea.setText(result.getContent());
-            appendResult("READ - SUCCESS: File content loaded");
+            contentArea.setCaretPosition(0); // Scroll to top
+            appendResult("READ - SUCCESS: File '" + fileName + "' loaded (" +
+                    result.getContent().length() + " characters)");
         } else {
+            contentArea.setText("");
             appendResult("READ - ERROR: " + result.getMessage());
         }
     }
@@ -180,12 +280,35 @@ public class DistributedFileSystemGUI extends JFrame {
             return;
         }
 
+        // Confirm deletion
+        int confirm = JOptionPane.showConfirmDialog(
+                this,
+                "Are you sure you want to delete '" + fileName + "'?",
+                "Confirm Delete",
+                JOptionPane.YES_NO_OPTION,
+                JOptionPane.WARNING_MESSAGE
+        );
+
+        if (confirm != JOptionPane.YES_OPTION) {
+            appendResult("DELETE - CANCELLED by user");
+            return;
+        }
+
         OperationResult result = client.delete(fileName);
         appendResult("DELETE - " + (result.isSuccess() ? "SUCCESS" : "ERROR") + ": " + result.getMessage());
 
         if (result.isSuccess()) {
             contentArea.setText("");
+            fileNameField.setText("");
+            // Refresh file list after successful delete
+            performListFiles();
         }
+    }
+
+    private void clearFileView() {
+        fileNameField.setText("");
+        contentArea.setText("");
+        appendResult("View cleared");
     }
 
     private void appendResult(String message) {

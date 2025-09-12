@@ -35,6 +35,12 @@ public class DistributedFileClient {
         return sendMessage(message);
     }
 
+    public OperationResult listFiles() {
+        ProtocolMessage message = new ProtocolMessage(ProtocolCommand.LIST, null, null);
+        message.setClientId(clientId);
+        return sendMessage(message);
+    }
+
     private OperationResult sendMessage(ProtocolMessage message) {
         try (Socket socket = new Socket(primaryHost, primaryPort);
              PrintWriter writer = new PrintWriter(socket.getOutputStream(), true);

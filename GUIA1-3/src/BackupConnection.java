@@ -50,6 +50,31 @@ public class BackupConnection {
         }
     }
 
+    public ProtocolMessage sendMessageAndWaitResponse(ProtocolMessage message, int timeoutMs) {
+        if (!connected || writer == null || reader == null) {
+            return null;
+        }
+
+        try {
+            writer.println(message.toString());
+
+            // Wait for response with timeout
+            socket.setSoTimeout(timeoutMs);
+            String responseStr = reader.readLine();
+            socket.setSoTimeout(0); // Reset timeout
+
+            if (responseStr != null) {
+                return ProtocolMessage.fromString(responseStr);
+            }
+
+        } catch (Exception e) {
+            LOGGER.log(Level.WARNING, "Failed to get response from backup", e);
+            connected = false;
+        }
+
+        return null;
+    }
+
     public void close() {
         connected = false;
         try {

@@ -1,11 +1,14 @@
-/**
- * Protocol commands for primary-backup system communication
- */
 public enum ProtocolCommand {
     WRITE("WRITE"),
     READ("READ"),
     DELETE("DELETE"),
+    LIST("LIST"),
     REPLICATE("REPLICATE"),
+    SYNC_REQUEST("SYNC_REQUEST"),         // Request full sync
+    SYNC_FILE("SYNC_FILE"),              // Sync specific file
+    SYNC_DELETE("SYNC_DELETE"),          // Delete file during sync
+    SYNC_STATE_REQUEST("SYNC_STATE_REQUEST"), // Request backup state
+    SYNC_STATE_RESPONSE("SYNC_STATE_RESPONSE"), // Backup state response
     HEARTBEAT("HEARTBEAT"),
     BACKUP_READY("BACKUP_READY"),
     SUCCESS("SUCCESS"),

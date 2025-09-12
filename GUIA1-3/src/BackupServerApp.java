@@ -4,7 +4,7 @@
 public class BackupServerApp {
     public static void main(String[] args) {
         int port = args.length > 0 ? Integer.parseInt(args[0]) : 8081;
-        String storageDir = args.length > 1 ? args[1] : "backup_storage";
+        String storageDir = args.length > 1 ? args[1] : "C:/Users/julia/Desktop/SistDistribuidos/backup_storage";
 
         BackupServer server = new BackupServer(port, storageDir);
 
