@@ -5,11 +5,13 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Logger;
 import java.util.logging.Level;
 
 /**
- * Primary server implementation
+ * 🔧 PRIMARY SERVER - CON REPLICACIÓN HÍBRIDA
+ * SOLUCIÓN DEFINITIVA: Combina socket + replicación directa de archivos
  */
 public class PrimaryServer {
     private static final Logger LOGGER = Logger.getLogger(PrimaryServer.class.getName());
@@ -17,18 +19,36 @@ public class PrimaryServer {
     private final FileSystemManager fileManager;
     private final ExecutorService clientThreadPool;
     private final CopyOnWriteArrayList<BackupConnection> backupServers;
+    private final AtomicInteger backupCounter = new AtomicInteger(0);
+
+    // 🔧 NUEVO: Hybrid Replication Manager
+    private final HybridReplicationManager replicationManager;
+
     private ServerSocket serverSocket;
     private volatile boolean running;
     private final ScheduledExecutorService syncScheduler;
-    private final int SYNC_INTERVAL_SECONDS = 10; // Sync every 10 seconds
+    private final int SYNC_INTERVAL_SECONDS = 15;
 
     public PrimaryServer(int port, String storageDirectory) {
         this.port = port;
         this.fileManager = new FileSystemManager(storageDirectory);
         this.clientThreadPool = Executors.newCachedThreadPool();
         this.backupServers = new CopyOnWriteArrayList<>();
-        this.syncScheduler = Executors.newScheduledThreadPool(1);
+        this.syncScheduler = Executors.newScheduledThreadPool(2);
         this.running = false;
+
+        // 🔧 Inicializar el manager de replicación híbrida
+        this.replicationManager = new HybridReplicationManager(storageDirectory);
+        setupBackupDirectories();
+    }
+
+    private void setupBackupDirectories() {
+        // Configurar directorios de backup conocidos
+        String baseDir = "C:/Users/julia/Desktop/SistDistribuidos";
+        replicationManager.addBackupDirectory(baseDir + "/backup_8081_storage");
+//        replicationManager.addBackupDirectory(baseDir + "/backup_8082_storage");
+
+        LOGGER.info("Configured backup directories for direct file replication");
     }
 
     public void start() {
@@ -36,10 +56,10 @@ public class PrimaryServer {
             serverSocket = new ServerSocket(port);
             running = true;
 
-            // Start periodic synchronization
             startPeriodicSync();
+            startBackupHealthMonitoring();
 
-            LOGGER.info("Primary server started on port " + port);
+            LOGGER.info("🚀 Primary server started on port " + port + " with HYBRID replication");
 
             while (running) {
                 try {
@@ -56,238 +76,101 @@ public class PrimaryServer {
         }
     }
 
-    private void startPeriodicSync() {
+    private void startBackupHealthMonitoring() {
         syncScheduler.scheduleAtFixedRate(() -> {
             try {
-                performFullSync();
+                monitorBackupHealth();
+            } catch (Exception e) {
+                LOGGER.log(Level.WARNING, "Error during backup health monitoring", e);
+            }
+        }, 30, 30, TimeUnit.SECONDS);
+    }
+
+    private void monitorBackupHealth() {
+        backupServers.removeIf(backup -> {
+            if (!backup.isConnected()) {
+                LOGGER.warning("Removing disconnected backup server");
+                backup.close();
+                return true;
+            }
+            return false;
+        });
+
+        LOGGER.info("Active backup servers: " + backupServers.size());
+    }
+
+    public void startPeriodicSync() {
+        syncScheduler.scheduleAtFixedRate(() -> {
+            try {
+                // Usar el hybrid manager para sincronización completa
+                replicationManager.performFullSync();
             } catch (Exception e) {
                 LOGGER.log(Level.WARNING, "Error during periodic sync", e);
             }
         }, SYNC_INTERVAL_SECONDS, SYNC_INTERVAL_SECONDS, TimeUnit.SECONDS);
 
-        LOGGER.info("Periodic synchronization started (every " + SYNC_INTERVAL_SECONDS + " seconds)");
+        LOGGER.info("Periodic hybrid synchronization started (every " + SYNC_INTERVAL_SECONDS + " seconds)");
     }
 
-    public void performFullSync() {
-        if (backupServers.isEmpty()) {
+    /**
+     * 🔧 NUEVA REPLICACIÓN HÍBRIDA: Usa el HybridReplicationManager
+     */
+    private void replicateToBackups(ProtocolMessage originalMessage, String actualContent) {
+        if (backupServers.isEmpty() && replicationManager == null) {
+            LOGGER.info("No replication targets available");
             return;
         }
 
-        LOGGER.info("Starting COMPLETE global state synchronization with backup servers");
+        LOGGER.info("🔄 Starting HYBRID replication for: " + originalMessage.getFileName() +
+                " (operation: " + originalMessage.getCommand() + ")");
 
-        // Get current state of primary server
-        Map<String, FileMetadata> primaryFiles = fileManager.getAllFilesMetadata();
-
-        for (BackupConnection backup : backupServers) {
-            if (backup.isConnected()) {
-                CompletableFuture.runAsync(() -> performCompleteSync(backup, primaryFiles));
-            }
-        }
-    }
-
-    private void performCompleteSync(BackupConnection backup, Map<String, FileMetadata> primaryFiles) {
         try {
-            LOGGER.info("Starting complete sync with backup server");
-
-            // STEP 1: Get backup server state
-            Map<String, FileMetadata> backupFiles = getBackupServerState(backup);
-            if (backupFiles == null) {
-                LOGGER.warning("Failed to get backup server state, skipping sync");
-                return;
-            }
-
-            // STEP 2: Identify files to sync FROM primary TO backup
-            Set<String> filesToSync = new HashSet<>();
-            Set<String> filesToCreate = new HashSet<>();
-
-            for (Map.Entry<String, FileMetadata> entry : primaryFiles.entrySet()) {
-                String fileName = entry.getKey();
-                FileMetadata primaryMetadata = entry.getValue();
-                FileMetadata backupMetadata = backupFiles.get(fileName);
-
-                if (backupMetadata == null) {
-                    // File exists in primary but not in backup - CREATE
-                    filesToCreate.add(fileName);
-                    LOGGER.info("File to CREATE in backup: " + fileName);
-                } else if (primaryMetadata.needsSync(backupMetadata)) {
-                    // File exists in both but differs - UPDATE
-                    filesToSync.add(fileName);
-                    LOGGER.info("File to UPDATE in backup: " + fileName +
-                            " (primary checksum: " + primaryMetadata.getChecksum() +
-                            ", backup checksum: " + backupMetadata.getChecksum() + ")");
-                }
-            }
-
-            // STEP 3: Identify files to DELETE FROM backup (exist in backup but not in primary)
-            Set<String> filesToDelete = new HashSet<>();
-            for (String backupFileName : backupFiles.keySet()) {
-                if (!primaryFiles.containsKey(backupFileName)) {
-                    filesToDelete.add(backupFileName);
-                    LOGGER.info("File to DELETE from backup: " + backupFileName);
-                }
-            }
-
-            // STEP 4: Execute synchronization operations
-            int syncedFiles = 0;
-            int createdFiles = 0;
-            int deletedFiles = 0;
-
-            // Sync existing files
-            for (String fileName : filesToSync) {
-                FileMetadata primaryFile = primaryFiles.get(fileName);
-                if (syncFileToBackup(backup, primaryFile)) {
-                    syncedFiles++;
-                }
-            }
-
-            // Create new files
-            for (String fileName : filesToCreate) {
-                FileMetadata primaryFile = primaryFiles.get(fileName);
-                if (syncFileToBackup(backup, primaryFile)) {
-                    createdFiles++;
-                }
-            }
-
-            // Delete orphaned files
-            for (String fileName : filesToDelete) {
-                if (deleteFileFromBackup(backup, fileName)) {
-                    deletedFiles++;
-                }
-            }
-
-            LOGGER.info(String.format(
-                    "Completed FULL sync with backup server - Updated: %d, Created: %d, Deleted: %d files",
-                    syncedFiles, createdFiles, deletedFiles));
-
-        } catch (Exception e) {
-            LOGGER.log(Level.WARNING, "Error during complete sync with backup", e);
-        }
-    }
-
-    private Map<String, FileMetadata> getBackupServerState(BackupConnection backup) {
-        try {
-            // Request backup server state
-            ProtocolMessage stateRequest = new ProtocolMessage(ProtocolCommand.SYNC_STATE_REQUEST, null, null);
-            ProtocolMessage response = backup.sendMessageAndWaitResponse(stateRequest, 10000); // 10s timeout
-
-            if (response == null || response.getCommand() != ProtocolCommand.SYNC_STATE_RESPONSE) {
-                LOGGER.warning("No valid response from backup server for state request");
-                return null;
-            }
-
-            // Parse backup server state
-            Map<String, FileMetadata> backupFiles = parseBackupState(response.getContent());
-            LOGGER.info("Received backup server state: " + backupFiles.size() + " files");
-
-            return backupFiles;
-
-        } catch (Exception e) {
-            LOGGER.log(Level.WARNING, "Error getting backup server state", e);
-            return null;
-        }
-    }
-
-    private Map<String, FileMetadata> parseBackupState(String stateContent) {
-        Map<String, FileMetadata> backupFiles = new HashMap<>();
-
-        if (stateContent == null || stateContent.trim().isEmpty()) {
-            return backupFiles; // Empty backup
-        }
-
-        String[] fileEntries = stateContent.split("\n");
-        for (String entry : fileEntries) {
-            if (entry.trim().isEmpty()) continue;
-
-            try {
-                // Format: filename|checksum|lastModified|size
-                String[] parts = entry.split("\\|", 4);
-                if (parts.length >= 4) {
-                    String fileName = parts[0];
-                    String checksum = parts[1];
-                    long lastModified = Long.parseLong(parts[2]);
-                    long size = Long.parseLong(parts[3]);
-
-                    // Create metadata without content (we don't need it for comparison)
-                    FileMetadata metadata = new FileMetadata(fileName, "", lastModified, size);
-                    // Set checksum manually since we don't have content
-                    metadata.setChecksum(checksum);
-
-                    backupFiles.put(fileName, metadata);
-                }
-            } catch (Exception e) {
-                LOGGER.log(Level.WARNING, "Error parsing backup file entry: " + entry, e);
-            }
-        }
-
-        return backupFiles;
-    }
-
-    /**
-     * Sync specific file to backup
-     */
-    private boolean syncFileToBackup(BackupConnection backup, FileMetadata fileMetadata) {
-        try {
-            ProtocolMessage syncMessage = new ProtocolMessage(
-                    ProtocolCommand.SYNC_FILE,
-                    fileMetadata.getFileName(),
-                    fileMetadata.getContent() + "|" + fileMetadata.getChecksum()
+            // Usar el HybridReplicationManager para replicación confiable
+            replicationManager.replicateFile(
+                    originalMessage.getFileName(),
+                    originalMessage.getCommand(),
+                    actualContent
             );
 
-            backup.sendMessage(syncMessage);
-            // Note: In production, you'd wait for confirmation
-            return true;
+            LOGGER.info("✅ Hybrid replication completed for: " + originalMessage.getFileName());
 
         } catch (Exception e) {
-            LOGGER.log(Level.WARNING, "Error syncing file to backup: " + fileMetadata.getFileName(), e);
-            return false;
+            LOGGER.log(Level.SEVERE, "❌ Hybrid replication failed for: " + originalMessage.getFileName(), e);
         }
     }
 
-    /**
-     * Delete file from backup
-     */
-    private boolean deleteFileFromBackup(BackupConnection backup, String fileName) {
+    public void addBackupServer(String host, int port) {
         try {
-            ProtocolMessage deleteMessage = new ProtocolMessage(ProtocolCommand.SYNC_DELETE, fileName, null);
-            backup.sendMessage(deleteMessage);
-            LOGGER.info("Sent delete command to backup for file: " + fileName);
-            return true;
+            BackupConnection backup = new BackupConnection(host, port);
+            if (backup.connect()) {
+                backupServers.add(backup);
 
-        } catch (Exception e) {
-            LOGGER.log(Level.WARNING, "Error deleting file from backup: " + fileName, e);
-            return false;
-        }
-    }
+                // 🔧 Agregar al manager de replicación híbrida
+                replicationManager.addBackupConnection(backup);
 
+                int backupId = backupCounter.incrementAndGet();
+                LOGGER.info("✅ Connected to backup server #" + backupId + ": " + host + ":" + port);
 
-
-    private void syncWithBackup(BackupConnection backup, Map<String, FileMetadata> primaryFiles) {
-        try {
-            // Send sync request to get backup files metadata
-            ProtocolMessage syncRequest = new ProtocolMessage(ProtocolCommand.SYNC_REQUEST, null, null);
-            backup.sendMessage(syncRequest);
-
-            // For each file in primary, sync if needed
-            for (FileMetadata primaryFile : primaryFiles.values()) {
-                ProtocolMessage syncMessage = new ProtocolMessage(
-                        ProtocolCommand.SYNC_FILE,
-                        primaryFile.getFileName(),
-                        primaryFile.getContent() + "|" + primaryFile.getChecksum()
-                );
-                backup.sendMessage(syncMessage);
+                // Trigger immediate sync
+                CompletableFuture.runAsync(() -> {
+                    try {
+                        Thread.sleep(2000);
+                        replicationManager.performFullSync();
+                    } catch (Exception e) {
+                        LOGGER.log(Level.WARNING, "Error during initial sync with new backup", e);
+                    }
+                });
+            } else {
+                LOGGER.warning("❌ Failed to connect to backup server: " + host + ":" + port);
             }
-
-            LOGGER.info("Completed sync with backup server - " + primaryFiles.size() + " files processed");
-
         } catch (Exception e) {
-            LOGGER.log(Level.WARNING, "Error syncing with backup", e);
+            LOGGER.log(Level.WARNING, "Failed to add backup server: " + host + ":" + port, e);
         }
     }
 
     public void stop() {
         running = false;
 
-        // Stop sync scheduler
         if (syncScheduler != null) {
             syncScheduler.shutdown();
             try {
@@ -316,58 +199,6 @@ public class PrimaryServer {
         }
     }
 
-    public void addBackupServer(String host, int port) {
-        try {
-            BackupConnection backup = new BackupConnection(host, port);
-            if (backup.connect()) {
-                backupServers.add(backup);
-                LOGGER.info("Connected to backup server: " + host + ":" + port);
-            }
-        } catch (Exception e) {
-            LOGGER.log(Level.WARNING, "Failed to connect to backup server: " + host + ":" + port, e);
-        }
-    }
-
-    private void replicateToBackups(ProtocolMessage originalMessage) {
-        if (backupServers.isEmpty()) {
-            return;
-        }
-
-        // For WRITE operations, get the current complete file content
-        String completeContent = null;
-        if (originalMessage.getCommand() == ProtocolCommand.WRITE) {
-            OperationResult readResult = fileManager.readFile(originalMessage.getFileName());
-            if (readResult.isSuccess()) {
-                completeContent = readResult.getContent();
-            }
-        }
-
-        // Create replication message with complete file content for consistency
-        String replicationContent;
-        if (completeContent != null) {
-            replicationContent = originalMessage.getCommand().getCommand() + "|" + completeContent;
-        } else {
-            replicationContent = originalMessage.getCommand().getCommand() + "|" +
-                    (originalMessage.getContent() != null ? originalMessage.getContent() : "");
-        }
-
-        ProtocolMessage replicationMessage = new ProtocolMessage(ProtocolCommand.REPLICATE,
-                originalMessage.getFileName(),
-                replicationContent);
-
-        LOGGER.info("Replicating to " + backupServers.size() + " backup servers: " +
-                originalMessage.getCommand() + " on " + originalMessage.getFileName());
-
-        for (BackupConnection backup : backupServers) {
-            if (backup.isConnected()) {
-                CompletableFuture.runAsync(() -> {
-                    backup.sendMessage(replicationMessage);
-                    LOGGER.fine("Sent replication message to backup server");
-                });
-            }
-        }
-    }
-
     private class ClientHandler implements Runnable {
         private final Socket clientSocket;
 
@@ -383,6 +214,8 @@ public class PrimaryServer {
                 String messageStr = reader.readLine();
                 if (messageStr != null) {
                     ProtocolMessage message = ProtocolMessage.fromString(messageStr);
+                    LOGGER.info("📨 Received: " + message.toDebugString());
+
                     ProtocolMessage response = processMessage(message);
                     writer.println(response.toString());
                 }
@@ -398,42 +231,67 @@ public class PrimaryServer {
             }
         }
 
+        /**
+         * 🔧 PROCESAMIENTO CON REPLICACIÓN HÍBRIDA
+         */
         private ProtocolMessage processMessage(ProtocolMessage message) {
             OperationResult result;
 
-            LOGGER.info("Processing command: " + message.getCommand() + " for file: " + message.getFileName());
+            LOGGER.info("🔄 Processing " + message.getCommand() + " for file: " + message.getFileName() +
+                    " from client: " + message.getClientId());
 
             switch (message.getCommand()) {
                 case WRITE:
+                    // 1. Escribir en el primary
                     result = fileManager.writeFile(message.getFileName(), message.getContent());
+
                     if (result.isSuccess()) {
-                        replicateToBackups(message);
-                        LOGGER.info("Write operation completed and replicated");
+                        // 2. Leer el contenido completo para replicación
+                        OperationResult readResult = fileManager.readFile(message.getFileName());
+                        if (readResult.isSuccess()) {
+                            String completeContent = readResult.getContent();
+                            LOGGER.info("📖 Read complete file for replication: " +
+                                    message.getFileName() + " (" + completeContent.length() + " chars)");
+
+                            // 3. 🔧 NUEVA REPLICACIÓN HÍBRIDA
+                            replicateToBackups(message, completeContent);
+
+                            LOGGER.info("✅ Write + hybrid replication completed for: " + message.getFileName());
+                        } else {
+                            LOGGER.warning("❌ Could not read file for replication: " + readResult.getMessage());
+                        }
+                    } else {
+                        LOGGER.warning("❌ Primary write failed: " + result.getMessage());
                     }
                     break;
 
                 case READ:
                     result = fileManager.readFile(message.getFileName());
+                    LOGGER.info("📖 Read completed: " + message.getFileName());
                     break;
 
                 case DELETE:
                     result = fileManager.deleteFile(message.getFileName());
                     if (result.isSuccess()) {
-                        replicateToBackups(message);
-                        LOGGER.info("Delete operation completed and replicated");
+                        // 🔧 REPLICACIÓN HÍBRIDA PARA DELETE
+                        replicateToBackups(message, "");
+                        LOGGER.info("🗑️ Delete + hybrid replication completed: " + message.getFileName());
                     }
                     break;
 
                 case LIST:
                     result = fileManager.listFiles();
+                    LOGGER.info("📋 List completed");
                     break;
 
                 default:
                     result = new OperationResult(false, "Unknown command: " + message.getCommand());
+                    LOGGER.warning("❓ Unknown command: " + message.getCommand());
             }
 
             ProtocolCommand responseCommand = result.isSuccess() ? ProtocolCommand.SUCCESS :
                     (result.getMessage().contains("not found") ? ProtocolCommand.NOT_FOUND : ProtocolCommand.ERROR);
+
             return new ProtocolMessage(responseCommand, message.getFileName(),
                     result.getContent() != null ? result.getContent() : result.getMessage());
         }

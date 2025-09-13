@@ -23,7 +23,6 @@ public class DistributedFileSystemGUI extends JFrame {
     private JButton listFilesButton;
     private JButton clearViewButton;
     private JButton refreshListButton;
-    private JButton syncButton;
     private JLabel syncStatusLabel;
     private JButton forceSyncButton;
 
@@ -65,13 +64,11 @@ public class DistributedFileSystemGUI extends JFrame {
         listFilesButton = new JButton("List Files");
         clearViewButton = new JButton("Clear View");
         refreshListButton = new JButton("Refresh List");
-        syncButton = new JButton("Force Sync");
         syncStatusLabel = new JLabel("Sync Status: Not connected");
         forceSyncButton = new JButton("Force Full Sync");
 
 
         // Initially disable operation buttons
-        syncButton.setEnabled(false);
         writeButton.setEnabled(false);
         readButton.setEnabled(false);
         deleteButton.setEnabled(false);
@@ -106,7 +103,6 @@ public class DistributedFileSystemGUI extends JFrame {
         JPanel listButtonPanel = new JPanel(new FlowLayout());
         listButtonPanel.add(listFilesButton);
         listButtonPanel.add(refreshListButton);
-        listButtonPanel.add(syncButton);
         leftPanel.add(listButtonPanel, BorderLayout.SOUTH);
 
         // Center panel - file operations
