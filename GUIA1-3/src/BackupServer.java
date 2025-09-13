@@ -9,7 +9,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * BACKUP SERVER - FIXED VERSION
+ * BACKUP SERVER
  * Consistent replication handling with proper content management
  */
 public class BackupServer {
@@ -114,7 +114,7 @@ public class BackupServer {
     }
 
     /**
-     * FIXED: Consistent replication message processing
+     * Consistent replication message processing
      */
     private void processReplicationMessage(ProtocolMessage message) {
         if (message.getCommand() != ProtocolCommand.REPLICATE) {
@@ -179,7 +179,7 @@ public class BackupServer {
     }
 
     /**
-     * FIXED: Enhanced sync file processing with better error handling
+     * Enhanced sync file processing with better error handling
      */
     private void processSyncFile(ProtocolMessage message) {
         try {
@@ -290,21 +290,5 @@ public class BackupServer {
      */
     public boolean isHealthy() {
         return running && serverSocket != null && !serverSocket.isClosed();
-    }
-
-    /**
-     * Get backup server statistics
-     */
-    public String getStats() {
-        try {
-            Map<String, FileMetadata> files = fileManager.getAllFilesMetadata();
-            long totalSize = files.values().stream().mapToLong(FileMetadata::getSize).sum();
-
-            return String.format("Backup %s: %d files, %.2f KB total, %s",
-                    serverId, files.size(), totalSize / 1024.0,
-                    primaryConnected ? "CONNECTED" : "DISCONNECTED");
-        } catch (Exception e) {
-            return String.format("Backup %s: ERROR - %s", serverId, e.getMessage());
-        }
     }
 }

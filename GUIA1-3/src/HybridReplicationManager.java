@@ -7,7 +7,7 @@ import java.util.logging.Logger;
 import java.util.logging.Level;
 
 /**
- * 🔧 HYBRID REPLICATION MANAGER
+ *  HYBRID REPLICATION MANAGER
  * Combina replicación por socket + replicación directa de archivos
  * Inspirado en tu función replicateFile()
  */
@@ -35,14 +35,14 @@ public class HybridReplicationManager {
     }
 
     /**
-     * 🔧 MÉTODO PRINCIPAL: Replicación híbrida
+     *  FUNCIÓN PRINCIPAL: Replicación híbrida
      * 1. Intenta replicación por socket (rápida)
      * 2. Si falla, usa replicación directa de archivos (confiable)
      */
     public void replicateFile(String fileName, ProtocolCommand operation, String content) {
         LOGGER.info("🔄 Starting hybrid replication for: " + fileName + " (operation: " + operation + ")");
 
-        // MÉTODO 1: Replicación por socket (rápida pero puede fallar)
+        // FUNCIÓN 1: Replicación por socket (rápida pero puede fallar)
         boolean socketReplicationSuccess = attemptSocketReplication(fileName, operation, content);
 
         if (socketReplicationSuccess) {
@@ -50,16 +50,16 @@ public class HybridReplicationManager {
         } else {
             LOGGER.warning("❌ Socket replication failed, falling back to direct file replication");
 
-            // MÉTODO 2: Replicación directa de archivos (confiable - tu método)
+            // FUNCIÓN 2: Replicación directa de archivos
             attemptDirectFileReplication(fileName, operation);
         }
 
-        // MÉTODO 3: Verificación posterior (opcional)
+        // FUNCIÓN 3: Verificación posterior (opcional)
         scheduleVerification(fileName, operation);
     }
 
     /**
-     * 🔧 Replicación por socket (método original mejorado)
+     *  Replicación por socket
      */
     private boolean attemptSocketReplication(String fileName, ProtocolCommand operation, String content) {
         if (backupConnections.isEmpty()) {
@@ -107,8 +107,7 @@ public class HybridReplicationManager {
     }
 
     /**
-     * 🔧 REPLICACIÓN DIRECTA DE ARCHIVOS (tu método adaptado)
-     * Este es el método más confiable - copia directamente los archivos
+     *  REPLICACIÓN DIRECTA DE ARCHIVOS
      */
     private void attemptDirectFileReplication(String fileName, ProtocolCommand operation) {
         File sourceFile = new File(primaryStorageDir, fileName);
@@ -123,7 +122,7 @@ public class HybridReplicationManager {
     }
 
     /**
-     * 🔧 TU MÉTODO ADAPTADO: Replicación de escritura por copia directa
+     * Replicación de escritura por copia directa
      */
     private void replicateFileWrite(File sourceFile) {
         if (!sourceFile.exists()) {
@@ -139,7 +138,7 @@ public class HybridReplicationManager {
                 // Crear directorio si no existe
                 Files.createDirectories(backupPath);
 
-                // 🔧 TU MÉTODO EXACTO: Copia con reemplazo y atributos
+                // Copia con reemplazo y atributos
                 Files.copy(sourceFile.toPath(), target,
                         StandardCopyOption.REPLACE_EXISTING,
                         StandardCopyOption.COPY_ATTRIBUTES);
@@ -168,7 +167,7 @@ public class HybridReplicationManager {
     }
 
     /**
-     * 🔧 Replicación de eliminación por borrado directo
+     *  Replicación de eliminación por borrado directo
      */
     private void replicateFileDelete(String fileName) {
         for (String backupDir : backupStorageDirs) {
@@ -190,7 +189,7 @@ public class HybridReplicationManager {
     }
 
     /**
-     * 🔧 Verificación posterior (ejecutar después de un delay)
+     *  Verificación posterior (ejecutar después de un delay)
      */
     private void scheduleVerification(String fileName, ProtocolCommand operation) {
         CompletableFuture.runAsync(() -> {
@@ -204,7 +203,7 @@ public class HybridReplicationManager {
     }
 
     /**
-     * 🔧 Verificación de que la replicación fue exitosa
+     *  Verificación de que la replicación fue exitosa
      */
     private void verifyReplication(String fileName, ProtocolCommand operation) {
         File primaryFile = new File(primaryStorageDir, fileName);
@@ -245,7 +244,7 @@ public class HybridReplicationManager {
     }
 
     /**
-     * 🔧 Sincronización completa (útil para recuperación)
+     *  Sincronización completa (útil para recuperación)
      */
     public void performFullSync() {
         LOGGER.info("🔄 Starting full synchronization using direct file replication");

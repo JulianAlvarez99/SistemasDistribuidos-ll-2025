@@ -28,12 +28,6 @@ public class FileMetadata {
         }
     }
 
-    public boolean needsSync(FileMetadata other) {
-        if (other == null) return true;
-        return !this.checksum.equals(other.checksum) ||
-                this.lastModified > other.lastModified;
-    }
-
     // Getters and Setters
     public String getFileName() { return fileName; }
     public String getContent() { return content; }
@@ -49,12 +43,4 @@ public class FileMetadata {
         return String.format("FileMetadata{name='%s', size=%d, checksum='%s', lastModified=%d}",
                 fileName, size, checksum, lastModified);
     }
-
-    public static FileMetadata fromStateString(String fileName, String checksum, long lastModified, long size) {
-        FileMetadata metadata = new FileMetadata(fileName, "", lastModified, size);
-        metadata.setChecksum(checksum);
-        return metadata;
-    }
-
-
 }

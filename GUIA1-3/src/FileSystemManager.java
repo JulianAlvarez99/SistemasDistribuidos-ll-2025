@@ -8,8 +8,8 @@ import java.util.logging.Logger;
 import java.util.logging.Level;
 
 /**
- * FILESYSTEM MANAGER - FINAL FIXED VERSION
- *  SOLUCIÓN: Flush inmediato y verificación de escritura
+ * FILESYSTEM MANAGER
+ * Flush inmediato y verificación de escritura
  */
 public class FileSystemManager {
     private static final Logger LOGGER = Logger.getLogger(FileSystemManager.class.getName());
@@ -34,7 +34,7 @@ public class FileSystemManager {
     }
 
     /**
-     *  MÉTODO CORREGIDO: Escritura con flush inmediato y verificación
+     *  FUNCIÓN CORREGIDO: Escritura con flush inmediato y verificación
      */
     public synchronized OperationResult writeFile(String fileName, String content, WriteMode writeMode) {
         try {
@@ -49,12 +49,12 @@ public class FileSystemManager {
 
             switch (writeMode) {
                 case APPEND:
-                    // Método con flush inmediato para APPEND
+                    // FUNCIÓN con flush inmediato para APPEND
                     writeWithImmediateFlush(filePath, content, true);
                     break;
 
                 case OVERWRITE:
-                    // Método con flush inmediato para OVERWRITE
+                    // FUNCIÓN con flush inmediato para OVERWRITE
                     writeWithImmediateFlush(filePath, content, false);
                     break;
 
@@ -66,7 +66,7 @@ public class FileSystemManager {
                     break;
             }
 
-            // 🔧 VERIFICACIÓN INMEDIATA: Leer el archivo para confirmar escritura
+            //  VERIFICACIÓN INMEDIATA: Leer el archivo para confirmar escritura
             String verificationContent = readFileImmediately(filePath);
             boolean writeSuccessful = true;
 
@@ -92,7 +92,7 @@ public class FileSystemManager {
     }
 
     /**
-     *  MÉTODO NUEVO: Escritura con flush inmediato y sincronización
+     *  FUNCIÓN Escritura con flush inmediato y sincronización
      */
     private void writeWithImmediateFlush(Path filePath, String content, boolean append) throws IOException {
         // Usar FileOutputStream con flush y sync inmediatos
@@ -109,7 +109,7 @@ public class FileSystemManager {
     }
 
     /**
-     *  MÉTODO NUEVO: Lectura inmediata para verificación
+     *  FUNCIÓN Lectura inmediata para verificación
      */
     private String readFileImmediately(Path filePath) throws IOException {
         // Leer inmediatamente después de escribir

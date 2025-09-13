@@ -1,17 +1,13 @@
 import java.net.*;
 import java.io.*;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Logger;
 import java.util.logging.Level;
 
 /**
- * 🔧 PRIMARY SERVER - CON REPLICACIÓN HÍBRIDA
- * SOLUCIÓN DEFINITIVA: Combina socket + replicación directa de archivos
+ * PRIMARY SERVER - CON REPLICACIÓN HÍBRIDA
+ * Combina socket + replicación directa de archivos
  */
 public class PrimaryServer {
     private static final Logger LOGGER = Logger.getLogger(PrimaryServer.class.getName());
@@ -20,8 +16,6 @@ public class PrimaryServer {
     private final ExecutorService clientThreadPool;
     private final CopyOnWriteArrayList<BackupConnection> backupServers;
     private final AtomicInteger backupCounter = new AtomicInteger(0);
-
-    // 🔧 NUEVO: Hybrid Replication Manager
     private final HybridReplicationManager replicationManager;
 
     private ServerSocket serverSocket;
@@ -113,7 +107,7 @@ public class PrimaryServer {
     }
 
     /**
-     * 🔧 NUEVA REPLICACIÓN HÍBRIDA: Usa el HybridReplicationManager
+     *  Usa el HybridReplicationManager
      */
     private void replicateToBackups(ProtocolMessage originalMessage, String actualContent) {
         if (backupServers.isEmpty() && replicationManager == null) {
@@ -232,7 +226,7 @@ public class PrimaryServer {
         }
 
         /**
-         * 🔧 PROCESAMIENTO CON REPLICACIÓN HÍBRIDA
+         * PROCESAMIENTO CON REPLICACIÓN HÍBRIDA
          */
         private ProtocolMessage processMessage(ProtocolMessage message) {
             OperationResult result;
@@ -253,7 +247,7 @@ public class PrimaryServer {
                             LOGGER.info("📖 Read complete file for replication: " +
                                     message.getFileName() + " (" + completeContent.length() + " chars)");
 
-                            // 3. 🔧 NUEVA REPLICACIÓN HÍBRIDA
+                            // 3.  NUEVA REPLICACIÓN HÍBRIDA
                             replicateToBackups(message, completeContent);
 
                             LOGGER.info("✅ Write + hybrid replication completed for: " + message.getFileName());

@@ -7,7 +7,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * 🔧 DISTRIBUTED FILE CLIENT - VERSIÓN CORREGIDA FINAL
+ * DISTRIBUTED FILE CLIENT
  * Cliente robusto con manejo de errores mejorado y protocolo corregido
  */
 public class DistributedFileClient {
@@ -27,7 +27,7 @@ public class DistributedFileClient {
     }
 
     /**
-     * 🔧 WRITE OPERATION - Escribir contenido a un archivo
+     *  WRITE OPERATION - Escribir contenido a un archivo
      */
     public OperationResult write(String fileName, String content) {
         if (fileName == null || fileName.trim().isEmpty()) {
@@ -47,7 +47,7 @@ public class DistributedFileClient {
     }
 
     /**
-     * 🔧 READ OPERATION - Leer contenido de un archivo
+     *  READ OPERATION - Leer contenido de un archivo
      */
     public OperationResult read(String fileName) {
         if (fileName == null || fileName.trim().isEmpty()) {
@@ -63,7 +63,7 @@ public class DistributedFileClient {
     }
 
     /**
-     * 🔧 DELETE OPERATION - Eliminar un archivo
+     * DELETE OPERATION - Eliminar un archivo
      */
     public OperationResult delete(String fileName) {
         if (fileName == null || fileName.trim().isEmpty()) {
@@ -79,7 +79,7 @@ public class DistributedFileClient {
     }
 
     /**
-     * 🔧 LIST OPERATION - Listar todos los archivos
+     *  LIST OPERATION - Listar todos los archivos
      */
     public OperationResult listFiles() {
         LOGGER.info("📋 LIST request");
@@ -91,7 +91,7 @@ public class DistributedFileClient {
     }
 
     /**
-     * 🔧 MÉTODO PRINCIPAL DE COMUNICACIÓN - Envío y recepción de mensajes
+     * 🔧 FUNCIÓN PRINCIPAL DE COMUNICACIÓN - Envío y recepción de mensajes
      */
     private OperationResult sendMessage(ProtocolMessage message, String operationDescription) {
         // Validar mensaje antes de enviar
@@ -174,7 +174,7 @@ public class DistributedFileClient {
     }
 
     /**
-     * 🔧 PROCESAMIENTO DE RESPUESTA DEL SERVIDOR
+     *  PROCESAMIENTO DE RESPUESTA DEL SERVIDOR
      */
     private OperationResult processServerResponse(ProtocolMessage response, String operationDescription) {
         if (response.getCommand() == null) {
@@ -205,58 +205,6 @@ public class DistributedFileClient {
                 String unexpectedMsg = "Unexpected response command: " + response.getCommand();
                 LOGGER.warning("⚠️ " + operationDescription + " - " + unexpectedMsg);
                 return new OperationResult(false, unexpectedMsg);
-        }
-    }
-
-    /**
-     * 🔧 TEST DE CONECTIVIDAD
-     */
-    public boolean testConnection() {
-        LOGGER.info("🔍 Testing connection to " + primaryHost + ":" + primaryPort);
-
-        try (Socket testSocket = new Socket()) {
-            testSocket.connect(new java.net.InetSocketAddress(primaryHost, primaryPort), 3000);
-            LOGGER.info("✅ Connection test successful");
-            return true;
-        } catch (Exception e) {
-            LOGGER.log(Level.WARNING, "❌ Connection test failed: " + e.getMessage(), e);
-            return false;
-        }
-    }
-
-    /**
-     * 🔧 INFORMACIÓN DEL CLIENTE
-     */
-    public String getClientInfo() {
-        return String.format("DistributedFileClient{server=%s:%d, clientId=%s, connectTimeout=%dms, readTimeout=%dms}",
-                primaryHost, primaryPort, clientId, connectionTimeoutMs, readTimeoutMs);
-    }
-
-    // Getters
-    public String getPrimaryHost() { return primaryHost; }
-    public int getPrimaryPort() { return primaryPort; }
-    public String getClientId() { return clientId; }
-
-    /**
-     * 🧪 MÉTODO DE TESTING ESTÁTICO
-     */
-    public static void runConnectionTest(String host, int port) {
-        System.out.println("🧪 Testing DistributedFileClient...");
-
-        DistributedFileClient client = new DistributedFileClient(host, port);
-        System.out.println("Client info: " + client.getClientInfo());
-
-        // Test connectivity
-        if (client.testConnection()) {
-            System.out.println("✅ Connection test passed");
-
-            // Test LIST operation
-            OperationResult listResult = client.listFiles();
-            System.out.println("LIST result: " + (listResult.isSuccess() ? "✅ SUCCESS" : "❌ FAILED") +
-                    " - " + listResult.getMessage());
-
-        } else {
-            System.out.println("❌ Connection test failed - server may not be running");
         }
     }
 }

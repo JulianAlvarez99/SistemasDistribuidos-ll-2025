@@ -1,5 +1,5 @@
 /**
- * 🔧 PROTOCOL MESSAGE - VERSIÓN FINAL CORREGIDA
+ * 🔧 PROTOCOL MESSAGE
  * Protocolo simplificado y robusto para comunicación cliente-servidor
  */
 public class ProtocolMessage {
@@ -61,13 +61,13 @@ public class ProtocolMessage {
                     clientId != null ? clientId : "");
 
         } catch (Exception e) {
-            System.err.println("❌ Error serializing message: " + e.getMessage());
+            System.err.println("Error serializing message: " + e.getMessage());
             throw new RuntimeException("Serialization failed", e);
         }
     }
 
     /**
-     * 🔧 DESERIALIZACIÓN CORREGIDA: Parsing robusto y con validación
+     *  DESERIALIZACIÓN : Parsing robusto y con validación
      */
     public static ProtocolMessage fromString(String messageStr) {
         if (messageStr == null || messageStr.trim().isEmpty()) {
@@ -138,7 +138,7 @@ public class ProtocolMessage {
     }
 
     /**
-     * 🔧 VALIDACIÓN DE MENSAJE MEJORADA
+     *  VALIDACIÓN DE MENSAJE
      */
     public boolean isValid() {
         if (command == null) {
@@ -178,7 +178,7 @@ public class ProtocolMessage {
     }
 
     /**
-     * 🔧 DEBUG STRING MEJORADO
+     * DEBUG STRING MEJORADO
      */
     public String toDebugString() {
         return String.format("ProtocolMessage{cmd=%s, file='%s', contentLen=%d, timestamp='%s', clientId='%s'}",
@@ -187,10 +187,5 @@ public class ProtocolMessage {
                 content != null ? content.length() : 0,
                 timestamp != null ? timestamp.substring(Math.max(0, timestamp.length() - 10)) : "null", // Solo últimos 10 chars
                 clientId != null ? clientId : "null");
-    }
-
-
-    private static boolean equals(String a, String b) {
-        return (a == null && b == null) || (a != null && a.equals(b));
     }
 }
