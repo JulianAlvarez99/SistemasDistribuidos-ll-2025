@@ -38,7 +38,7 @@ public class PrimaryServer {
 
     private void setupBackupDirectories() {
         // Configurar directorios de backup conocidos
-        String baseDir = "C:/Users/julia/Desktop/SistDistribuidos";
+        String baseDir = "C:/Users/julia/OneDrive/Desktop/RepoMaster";
         replicationManager.addBackupDirectory(baseDir + "/backup_8081_storage");
 //        replicationManager.addBackupDirectory(baseDir + "/backup_8082_storage");
 

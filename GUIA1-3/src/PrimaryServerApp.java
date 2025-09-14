@@ -14,7 +14,7 @@ public class PrimaryServerApp {
     public static void main(String[] args) {
         // Parse command line arguments
         int port = args.length > 0 ? Integer.parseInt(args[0]) : 8080;
-        String storageDir = args.length > 1 ? args[1] : "C:/Users/julia/Desktop/SistDistribuidos/primary_storage";
+        String storageDir = args.length > 1 ? args[1] : "C:/Users/julia/OneDrive/Desktop/RepoMaster/primary_storage";
 
         // Initialize primary server
         server = new PrimaryServer(port, storageDir);

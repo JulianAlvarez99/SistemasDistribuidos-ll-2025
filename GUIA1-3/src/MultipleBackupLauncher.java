@@ -45,7 +45,7 @@ public class MultipleBackupLauncher {
     public void startBackupServers(int count, int startPort) {
         for (int i = 0; i < count; i++) {
             int port = startPort + i;
-            String storageDir = String.format("C:/Users/julia/Desktop/SistDistribuidos/backup_%d_storage", port);
+            String storageDir = String.format("C:/Users/julia/OneDrive/Desktop/RepoMaster/backup_%d_storage", port);
 
             BackupServerInstance instance = new BackupServerInstance(port, storageDir);
             backupInstances.add(instance);
