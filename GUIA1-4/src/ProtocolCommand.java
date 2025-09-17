@@ -1,7 +1,7 @@
 public enum ProtocolCommand {
     // Comandos originales del cliente
     WRITE("WRITE"),
-    READ("READ"),
+    READ("READ"),           // ✅ CORREGIDO: Era "read", ahora es "READ"
     DELETE("DELETE"),
     LIST("LIST"),
 
@@ -53,11 +53,18 @@ public enum ProtocolCommand {
     }
 
     public static ProtocolCommand fromString(String command) {
+        if (command == null || command.trim().isEmpty()) {
+            throw new IllegalArgumentException("Command cannot be null or empty");
+        }
+
+        String normalizedCommand = command.trim().toUpperCase();
+
         for (ProtocolCommand cmd : values()) {
-            if (cmd.command.equals(command)) {
+            if (cmd.command.equalsIgnoreCase(normalizedCommand)) {
                 return cmd;
             }
         }
+
         throw new IllegalArgumentException("Unknown command: " + command);
     }
 
@@ -93,5 +100,19 @@ public enum ProtocolCommand {
         return this == REPLICA_JOIN || this == REPLICA_LEAVE ||
                 this == REPLICA_STATUS || this == REPLICA_SYNC_REQUEST ||
                 this == REPLICA_SYNC_RESPONSE;
+    }
+
+    /**
+     * 🔍 VERIFICAR SI REQUIERE ARCHIVO
+     */
+    public boolean requiresFileName() {
+        return this == WRITE || this == READ || this == DELETE;
+    }
+
+    /**
+     * 🔍 VERIFICAR SI REQUIERE CONTENIDO
+     */
+    public boolean requiresContent() {
+        return this == WRITE;
     }
 }

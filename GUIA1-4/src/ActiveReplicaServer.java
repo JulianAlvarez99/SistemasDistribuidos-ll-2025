@@ -6,15 +6,15 @@ import java.util.logging.Level;
 import java.util.*;
 
 /**
- * 🔄 ACTIVE REPLICA SERVER
- * Servidor que implementa redundancia activa - puede recibir operaciones de clientes
- * y coordinar con otras réplicas para mantener consistencia
+ * 🔄 CORRECTED ACTIVE REPLICA SERVER
+ * Servidor con redundancia activa completamente funcional
  */
 public class ActiveReplicaServer {
     private static final Logger LOGGER = Logger.getLogger(ActiveReplicaServer.class.getName());
 
     private final String serverId;
     private final int port;
+    private final SystemConfig config;
     private final FileSystemManager fileManager;
     private final DistributedLockManager lockManager;
     private final ActiveReplicationManager replicationManager;
@@ -29,6 +29,7 @@ public class ActiveReplicaServer {
     private final ScheduledExecutorService maintenanceScheduler;
 
     public ActiveReplicaServer(int port, String storageDirectory) {
+        this.config = SystemConfig.getInstance();
         this.serverId = "REPLICA_" + port;
         this.port = port;
         this.fileManager = new FileSystemManager(storageDirectory);
@@ -38,8 +39,10 @@ public class ActiveReplicaServer {
         this.clientThreadPool = Executors.newCachedThreadPool();
         this.replicaThreadPool = Executors.newCachedThreadPool();
         this.knownReplicas = new ConcurrentHashMap<>();
-        this.maintenanceScheduler = Executors.newScheduledThreadPool(1);
+        this.maintenanceScheduler = Executors.newScheduledThreadPool(2);
         this.running = false;
+
+        LOGGER.info("🔄 ActiveReplicaServer initialized: " + serverId);
     }
 
     /**
@@ -54,13 +57,14 @@ public class ActiveReplicaServer {
             startMaintenanceServices();
 
             LOGGER.info("🔄 Active Replica Server (" + serverId + ") started on port " + port);
-            LOGGER.info("📊 Configuration: Storage=" + fileManager.toString());
+            LOGGER.info("📊 Configuration: " + fileManager.toString());
 
             while (running) {
                 try {
                     Socket clientSocket = serverSocket.accept();
+                    clientSocket.setSoTimeout(config.getReadTimeoutMs());
 
-                    // Determinar si es cliente o réplica basado en el primer mensaje
+                    // Procesar conexión en hilo separado
                     clientThreadPool.submit(new ConnectionHandler(clientSocket));
 
                 } catch (IOException e) {
@@ -71,6 +75,7 @@ public class ActiveReplicaServer {
             }
         } catch (IOException e) {
             LOGGER.log(Level.SEVERE, "Failed to start Active Replica Server", e);
+            throw new RuntimeException("Server startup failed", e);
         }
     }
 
@@ -78,23 +83,23 @@ public class ActiveReplicaServer {
      * 🔧 SERVICIOS DE MANTENIMIENTO
      */
     private void startMaintenanceServices() {
-        // Monitoreo de salud de réplicas cada 30 segundos
+        // Monitoreo de salud de réplicas
         maintenanceScheduler.scheduleAtFixedRate(() -> {
             try {
                 monitorReplicaHealth();
             } catch (Exception e) {
                 LOGGER.log(Level.WARNING, "Error during replica health monitoring", e);
             }
-        }, 30, 30, TimeUnit.SECONDS);
+        }, config.getHealthCheckIntervalSec(), config.getHealthCheckIntervalSec(), TimeUnit.SECONDS);
 
-        // Limpieza de operaciones antiguas cada 5 minutos
+        // Limpieza de operaciones antiguas
         maintenanceScheduler.scheduleAtFixedRate(() -> {
             try {
                 cleanupOldOperations();
             } catch (Exception e) {
                 LOGGER.log(Level.WARNING, "Error during operation cleanup", e);
             }
-        }, 300, 300, TimeUnit.SECONDS);
+        }, config.getCleanupIntervalSec(), config.getCleanupIntervalSec(), TimeUnit.SECONDS);
     }
 
     /**
@@ -123,8 +128,8 @@ public class ActiveReplicaServer {
      * 🧹 LIMPIAR OPERACIONES ANTIGUAS
      */
     private void cleanupOldOperations() {
-        // Implementar limpieza de historial de operaciones antiguas
         LOGGER.fine("🧹 Cleaning up old operations");
+        // La limpieza específica se maneja en los managers individuales
     }
 
     /**
@@ -154,9 +159,11 @@ public class ActiveReplicaServer {
 
             } else {
                 LOGGER.warning("❌ Failed to connect to replica: " + host + ":" + port);
+                throw new RuntimeException("Connection failed");
             }
         } catch (Exception e) {
             LOGGER.log(Level.WARNING, "Error adding replica: " + host + ":" + port, e);
+            throw e;
         }
     }
 
@@ -187,12 +194,18 @@ public class ActiveReplicaServer {
      */
     private boolean isReplicaHealthy(ReplicaInfo replica) {
         try {
-            // Enviar heartbeat
             ProtocolMessage heartbeat = new ProtocolMessage(ProtocolCommand.HEARTBEAT, null, serverId);
-            ProtocolMessage response = replica.getConnection().sendMessageAndWaitResponse(heartbeat, 5000);
+            ProtocolMessage response = replica.getConnection().sendMessageAndWaitResponse(
+                    heartbeat, config.getConnectionTimeoutMs());
 
-            return response != null;
+            boolean healthy = response != null && response.getCommand() == ProtocolCommand.SUCCESS;
+            if (healthy) {
+                replica.updateHeartbeat();
+            }
+            return healthy;
+
         } catch (Exception e) {
+            LOGGER.log(Level.FINE, "Health check failed for: " + replica.getServerId(), e);
             return false;
         }
     }
@@ -205,16 +218,18 @@ public class ActiveReplicaServer {
 
         LOGGER.info("🛑 Stopping Active Replica Server: " + serverId);
 
-        // Cerrar recursos
         try {
-            if (serverSocket != null) {
+            // Cerrar socket del servidor
+            if (serverSocket != null && !serverSocket.isClosed()) {
                 serverSocket.close();
             }
 
-            clientThreadPool.shutdown();
-            replicaThreadPool.shutdown();
-            maintenanceScheduler.shutdown();
+            // Shutdown thread pools
+            shutdownExecutorService(clientThreadPool, "Client Thread Pool");
+            shutdownExecutorService(replicaThreadPool, "Replica Thread Pool");
+            shutdownExecutorService(maintenanceScheduler, "Maintenance Scheduler");
 
+            // Shutdown managers
             lockManager.shutdown();
             replicationManager.shutdown();
 
@@ -227,11 +242,26 @@ public class ActiveReplicaServer {
                 }
             }
 
-        } catch (IOException e) {
+        } catch (Exception e) {
             LOGGER.log(Level.WARNING, "Error stopping server", e);
         }
 
         LOGGER.info("✅ Active Replica Server stopped");
+    }
+
+    private void shutdownExecutorService(ExecutorService executor, String name) {
+        if (executor != null) {
+            executor.shutdown();
+            try {
+                if (!executor.awaitTermination(10, TimeUnit.SECONDS)) {
+                    LOGGER.warning("⚠️ Forcing shutdown of " + name);
+                    executor.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                executor.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
+        }
     }
 
     /**
@@ -241,14 +271,20 @@ public class ActiveReplicaServer {
         Map<String, Object> stats = new HashMap<>();
         stats.put("serverId", serverId);
         stats.put("port", port);
+        stats.put("running", running);
         stats.put("activeReplicas", knownReplicas.size());
         stats.put("lockStats", lockManager.getLockStatistics());
         stats.put("replicationStats", replicationManager.getReplicationStatistics());
+
+        // Estadísticas del file manager
+        Map<String, FileMetadata> files = fileManager.getAllFilesMetadata();
+        stats.put("totalFiles", files.size());
+
         return stats;
     }
 
     /**
-     * 🔌 MANEJADOR DE CONEXIONES
+     * 🔌 MANEJADOR DE CONEXIONES MEJORADO
      */
     private class ConnectionHandler implements Runnable {
         private final Socket socket;
@@ -263,24 +299,43 @@ public class ActiveReplicaServer {
                  PrintWriter writer = new PrintWriter(socket.getOutputStream(), true)) {
 
                 String messageStr = reader.readLine();
-                if (messageStr != null) {
+                if (messageStr != null && !messageStr.trim().isEmpty()) {
+
+                    LOGGER.info("📨 Received message: " + messageStr);
+
                     ProtocolMessage message = ProtocolMessage.fromString(messageStr);
+                    ProtocolMessage response;
 
                     // Determinar el tipo de conexión y procesar
                     if (message.getCommand().isClientCommand()) {
-                        // Es un cliente
-                        handleClientRequest(message, writer);
+                        response = handleClientRequest(message);
+                    } else if (message.getCommand().isLockCommand()) {
+                        response = handleLockMessage(message);
+                    } else if (message.getCommand().isReplicationCommand()) {
+                        response = handleReplicationMessage(message);
+                    } else if (message.getCommand() == ProtocolCommand.HEARTBEAT) {
+                        response = new ProtocolMessage(ProtocolCommand.SUCCESS, null, serverId);
                     } else {
-                        // Es otra réplica
-                        handleReplicaMessage(message, writer);
+                        response = new ProtocolMessage(ProtocolCommand.ERROR, null,
+                                "Unsupported command: " + message.getCommand());
                     }
+
+                    if (response != null) {
+                        String responseStr = response.toString();
+                        LOGGER.info("📤 Sending response: " + responseStr);
+                        writer.println(responseStr);
+                    }
+                } else {
+                    LOGGER.warning("❌ Received empty or null message");
                 }
 
             } catch (Exception e) {
-                LOGGER.log(Level.WARNING, "Error handling connection", e);
+                LOGGER.log(Level.WARNING, "Error handling connection from: " + socket.getRemoteSocketAddress(), e);
             } finally {
                 try {
-                    socket.close();
+                    if (!socket.isClosed()) {
+                        socket.close();
+                    }
                 } catch (IOException e) {
                     LOGGER.log(Level.WARNING, "Error closing socket", e);
                 }
@@ -290,29 +345,62 @@ public class ActiveReplicaServer {
         /**
          * 👤 MANEJAR SOLICITUD DE CLIENTE
          */
-        private void handleClientRequest(ProtocolMessage message, PrintWriter writer) {
-            LOGGER.info("👤 Client request: " + message.toDebugString());
-
-            ProtocolMessage response = processClientOperation(message);
-            writer.println(response.toString());
+        private ProtocolMessage handleClientRequest(ProtocolMessage message) {
+            LOGGER.info("👤 Processing client request: " + message.toDebugString());
+            return processClientOperation(message);
         }
 
         /**
-         * 🔄 MANEJAR MENSAJE DE RÉPLICA
+         * 🔒 MANEJAR MENSAJE DE LOCK
          */
-        private void handleReplicaMessage(ProtocolMessage message, PrintWriter writer) {
-            LOGGER.info("🔄 Replica message: " + message.toDebugString());
+        private ProtocolMessage handleLockMessage(ProtocolMessage message) {
+            LOGGER.info("🔒 Processing lock message: " + message.toDebugString());
 
-            ProtocolMessage response = processReplicaMessage(message);
-            if (response != null) {
-                writer.println(response.toString());
+            switch (message.getCommand()) {
+                case LOCK_REQUEST:
+                    return lockManager.processLockRequest(message);
+                case LOCK_RELEASED:
+                    lockManager.processLockRelease(message);
+                    return null; // No response needed
+                default:
+                    return new ProtocolMessage(ProtocolCommand.ERROR, message.getFileName(),
+                            "Unsupported lock command");
+            }
+        }
+
+        /**
+         * 🔄 MANEJAR MENSAJE DE REPLICACIÓN
+         */
+        private ProtocolMessage handleReplicationMessage(ProtocolMessage message) {
+            LOGGER.info("🔄 Processing replication message: " + message.toDebugString());
+
+            switch (message.getCommand()) {
+                case OPERATION_PROPOSAL:
+                    LOGGER.info("💭 Received operation proposal for: " + message.getFileName());
+                    ProtocolMessage proposalResponse = replicationManager.processOperationProposal(message);
+                    LOGGER.info("💭 Proposal response: " + (proposalResponse != null ? proposalResponse.getCommand() : "null"));
+                    return proposalResponse;
+
+                case OPERATION_COMMIT:
+                    LOGGER.info("✅ Received operation commit for: " + message.getFileName());
+                    ProtocolMessage commitResponse = replicationManager.processOperationCommit(message, fileManager);
+                    LOGGER.info("✅ Commit response: " + (commitResponse != null ? commitResponse.getCommand() : "null"));
+                    return commitResponse;
+
+                case OPERATION_ABORT:
+                    LOGGER.info("❌ Received operation abort for: " + message.getFileName());
+                    return null; // No response needed
+
+                default:
+                    LOGGER.warning("⚠️ Unsupported replication command: " + message.getCommand());
+                    return new ProtocolMessage(ProtocolCommand.ERROR, message.getFileName(),
+                            "Unsupported replication command");
             }
         }
     }
 
     /**
-     * 👤 PROCESAR OPERACIÓN DE CLIENTE
-     * Redundancia activa
+     * 👤 PROCESAR OPERACIÓN DE CLIENTE - Redundancia activa completa
      */
     private ProtocolMessage processClientOperation(ProtocolMessage message) {
         String fileName = message.getFileName();
@@ -334,57 +422,67 @@ public class ActiveReplicaServer {
                     return processListOperation();
 
                 default:
-                    return new ProtocolMessage(ProtocolCommand.ERROR, fileName, "Unsupported operation");
+                    return new ProtocolMessage(ProtocolCommand.ERROR, fileName,
+                            "Unsupported operation: " + operation);
             }
 
         } catch (Exception e) {
             LOGGER.log(Level.SEVERE, "Error processing client operation", e);
-            return new ProtocolMessage(ProtocolCommand.ERROR, fileName, "Server error: " + e.getMessage());
+            return new ProtocolMessage(ProtocolCommand.ERROR, fileName,
+                    "Server error: " + e.getMessage());
         }
     }
 
     /**
-     * ✍️ PROCESAR OPERACIÓN DE ESCRITURA (WRITE/DELETE)
-     * Implementa el protocolo de redundancia activa completo
+     * ✍️ PROCESAR OPERACIÓN DE ESCRITURA (WRITE/DELETE) - CORREGIDA
      */
     private ProtocolMessage processWriteOperation(String fileName, ProtocolCommand operation, String content) {
         LOGGER.info("✍️ Processing write operation with active replication: " + operation + " on " + fileName);
+        LOGGER.info("📊 Current replicas available: " + knownReplicas.size());
 
         try {
             // FASE 1: Adquirir lock distribuido
+            LOGGER.info("🔒 Acquiring distributed lock for: " + fileName);
             if (!lockManager.acquireDistributedLock(fileName, operation.getCommand())) {
-                return new ProtocolMessage(ProtocolCommand.ERROR, fileName, "Could not acquire distributed lock");
+                LOGGER.warning("❌ Could not acquire distributed lock for: " + fileName);
+                return new ProtocolMessage(ProtocolCommand.ERROR, fileName,
+                        "Could not acquire distributed lock");
             }
 
             try {
-                // FASE 2: Ejecutar operación localmente
-                OperationResult localResult = executeLocalOperation(fileName, operation, content);
-
-                if (!localResult.isSuccess()) {
-                    return new ProtocolMessage(ProtocolCommand.ERROR, fileName, localResult.getMessage());
-                }
-
-                // FASE 3: Sincronizar con todas las réplicas
+                // FASE 2: Sincronizar con todas las réplicas ANTES de ejecutar localmente
+                LOGGER.info("🔄 Starting synchronization with " + knownReplicas.size() + " replicas");
                 boolean syncSuccess = replicationManager.synchronizeOperation(fileName, operation, content);
 
-                if (syncSuccess) {
+                if (!syncSuccess) {
+                    LOGGER.warning("❌ Synchronization failed, aborting operation: " + operation + " on " + fileName);
+                    return new ProtocolMessage(ProtocolCommand.ERROR, fileName,
+                            "Synchronization with replicas failed");
+                }
+
+                // FASE 3: Ejecutar operación localmente DESPUÉS de confirmar sincronización
+                LOGGER.info("💾 Executing operation locally: " + operation + " on " + fileName);
+                OperationResult localResult = executeLocalOperation(fileName, operation, content);
+
+                if (localResult.isSuccess()) {
                     LOGGER.info("✅ Write operation completed successfully: " + operation + " on " + fileName);
                     return new ProtocolMessage(ProtocolCommand.SUCCESS, fileName,
-                            localResult.getContent() != null ? localResult.getContent() : "Operation completed");
+                            "Operation completed and synchronized across all replicas");
                 } else {
-                    LOGGER.warning("❌ Synchronization failed for: " + operation + " on " + fileName);
-                    // En caso de fallo de sync, podríamos revertir la operación local
-                    return new ProtocolMessage(ProtocolCommand.ERROR, fileName, "Synchronization failed");
+                    LOGGER.warning("❌ Local execution failed: " + localResult.getMessage());
+                    return new ProtocolMessage(ProtocolCommand.ERROR, fileName, localResult.getMessage());
                 }
 
             } finally {
                 // FASE 4: Liberar lock distribuido
+                LOGGER.info("🔓 Releasing distributed lock for: " + fileName);
                 lockManager.releaseDistributedLock(fileName);
             }
 
         } catch (Exception e) {
-            LOGGER.log(Level.SEVERE, "Error during write operation with active replication", e);
-            return new ProtocolMessage(ProtocolCommand.ERROR, fileName, "Replication error: " + e.getMessage());
+            LOGGER.log(Level.SEVERE, "❌ Error during write operation with active replication", e);
+            return new ProtocolMessage(ProtocolCommand.ERROR, fileName,
+                    "Replication error: " + e.getMessage());
         }
     }
 
@@ -419,34 +517,12 @@ public class ActiveReplicaServer {
     private OperationResult executeLocalOperation(String fileName, ProtocolCommand operation, String content) {
         switch (operation) {
             case WRITE:
-                return fileManager.writeFile(fileName, content);
+                return fileManager.replaceFileContent(fileName, content);
             case DELETE:
                 return fileManager.deleteFile(fileName);
             default:
                 return new OperationResult(false, "Unsupported local operation: " + operation);
         }
-    }
-
-    /**
-     * 🔄 PROCESAR MENSAJE DE RÉPLICA
-     */
-    private ProtocolMessage processReplicaMessage(ProtocolMessage message) {
-        if (message.getCommand().isLockCommand()) {
-            return lockManager.processLockRequest(message);
-        } else if (message.getCommand().isReplicationCommand()) {
-            switch (message.getCommand()) {
-                case OPERATION_PROPOSAL:
-                    return replicationManager.processOperationProposal(message);
-                case OPERATION_COMMIT:
-                    return replicationManager.processOperationCommit(message, fileManager);
-                default:
-                    return null; // No response needed
-            }
-        } else if (message.getCommand() == ProtocolCommand.HEARTBEAT) {
-            return new ProtocolMessage(ProtocolCommand.SUCCESS, null, serverId);
-        }
-
-        return null;
     }
 
     /**
@@ -459,7 +535,8 @@ public class ActiveReplicaServer {
         private final DistributedLockManager.ServerConnection connection;
         private volatile long lastHeartbeat;
 
-        public ReplicaInfo(String serverId, String host, int port, DistributedLockManager.ServerConnection connection) {
+        public ReplicaInfo(String serverId, String host, int port,
+                           DistributedLockManager.ServerConnection connection) {
             this.serverId = serverId;
             this.host = host;
             this.port = port;

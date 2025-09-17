@@ -9,24 +9,23 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * 🔄 MULTI-REPLICA FILE CLIENT
- * Cliente que puede conectarse a cualquier réplica activa
- * Implementa load balancing y failover automático
+ * 🔄 CORRECTED MULTI-REPLICA FILE CLIENT
+ * Cliente corregido que implementa correctamente la redundancia activa
  */
 public class MultiReplicaFileClient {
     private static final Logger LOGGER = Logger.getLogger(MultiReplicaFileClient.class.getName());
 
     private final List<ReplicaEndpoint> availableReplicas;
     private final String clientId;
-    private final int connectionTimeoutMs;
-    private final int readTimeoutMs;
+    private final SystemConfig config;
     private final int maxRetries;
     private final LoadBalancingStrategy loadBalancing;
+    private int currentReplicaIndex = 0; // Para round robin
 
     public enum LoadBalancingStrategy {
-        ROUND_ROBIN("ROUND_ROBIN"),    // Rotar entre réplicas
-        RANDOM("RANDOM"),         // Selección aleatoria
-        PREFERRED("PREFERRED");       // Usar réplica preferida si está disponible
+        ROUND_ROBIN("ROUND_ROBIN"),
+        RANDOM("RANDOM"),
+        PREFERRED("PREFERRED");
 
         private final String command;
 
@@ -46,21 +45,33 @@ public class MultiReplicaFileClient {
             }
             throw new IllegalArgumentException("Unknown command: " + command);
         }
-
     }
 
     public MultiReplicaFileClient(String strategy) {
+        this.config = SystemConfig.getInstance();
         this.availableReplicas = new ArrayList<>();
         this.clientId = "MULTI_CLIENT_" + System.currentTimeMillis();
-        this.connectionTimeoutMs = 10000;
-        this.readTimeoutMs = 30000;
-        this.maxRetries = 3;
+        this.maxRetries = config.getMaxRetries();
         this.loadBalancing = LoadBalancingStrategy.fromString(strategy);
 
-        // Configurar réplicas por defecto
-        addReplica("localhost", 8080, true);  // Réplica preferida
-        addReplica("localhost", 8081, false);
-        addReplica("localhost", 8082, false);
+        // Configurar réplicas automáticamente desde configuración
+        configurarReplicasDesdeConfig();
+
+        LOGGER.info("🔄 MultiReplicaFileClient initialized with strategy: " + strategy);
+        LOGGER.info("📊 Available replicas: " + availableReplicas.size());
+    }
+
+    /**
+     * ⚙️ CONFIGURAR RÉPLICAS DESDE CONFIGURACIÓN
+     */
+    private void configurarReplicasDesdeConfig() {
+        String host = config.getDefaultHost();
+        int[] ports = config.getDefaultPorts();
+
+        for (int i = 0; i < ports.length; i++) {
+            boolean isPreferred = (i == 0); // Primer puerto como preferido
+            addReplica(host, ports[i], isPreferred);
+        }
     }
 
     /**
@@ -73,16 +84,7 @@ public class MultiReplicaFileClient {
     }
 
     /**
-     * 🔗 REMOVER RÉPLICA
-     */
-    public void removeReplica(String host, int port) {
-        availableReplicas.removeIf(replica ->
-                replica.getHost().equals(host) && replica.getPort() == port);
-        LOGGER.info("Removed replica: " + host + ":" + port);
-    }
-
-    /**
-     * 📝 WRITE OPERATION CON REDUNDANCIA ACTIVA
+     * 📝 WRITE OPERATION - Redundancia activa real
      */
     public OperationResult write(String fileName, String content) {
         if (fileName == null || fileName.trim().isEmpty()) {
@@ -98,11 +100,12 @@ public class MultiReplicaFileClient {
         ProtocolMessage message = new ProtocolMessage(ProtocolCommand.WRITE, fileName, content);
         message.setClientId(clientId);
 
-        return executeOperationWithFailover(message, "WRITE " + fileName);
+        // En redundancia activa, enviar a UNA réplica que coordinará con las demás
+        return executeOperationWithActiveReplication(message, "WRITE " + fileName);
     }
 
     /**
-     * 📖 READ OPERATION
+     * 📖 READ OPERATION - Puede leer desde cualquier réplica
      */
     public OperationResult read(String fileName) {
         if (fileName == null || fileName.trim().isEmpty()) {
@@ -118,7 +121,7 @@ public class MultiReplicaFileClient {
     }
 
     /**
-     * 🗑️ DELETE OPERATION CON REDUNDANCIA ACTIVA
+     * 🗑️ DELETE OPERATION - Redundancia activa real
      */
     public OperationResult delete(String fileName) {
         if (fileName == null || fileName.trim().isEmpty()) {
@@ -130,11 +133,12 @@ public class MultiReplicaFileClient {
         ProtocolMessage message = new ProtocolMessage(ProtocolCommand.DELETE, fileName, null);
         message.setClientId(clientId);
 
-        return executeOperationWithFailover(message, "DELETE " + fileName);
+        // En redundancia activa, enviar a UNA réplica que coordinará con las demás
+        return executeOperationWithActiveReplication(message, "DELETE " + fileName);
     }
 
     /**
-     * 📋 LIST OPERATION
+     * 📋 LIST OPERATION - Puede listar desde cualquier réplica
      */
     public OperationResult listFiles() {
         LOGGER.info("📋 LIST request");
@@ -146,7 +150,77 @@ public class MultiReplicaFileClient {
     }
 
     /**
-     * 🔄 EJECUTAR OPERACIÓN CON FAILOVER AUTOMÁTICO
+     * 🔄 EJECUTAR OPERACIÓN CON REDUNDANCIA ACTIVA
+     * Para operaciones de escritura/eliminación - enviar solo a UNA réplica coordinadora
+     */
+    private OperationResult executeOperationWithActiveReplication(ProtocolMessage message, String operationDescription) {
+        List<ReplicaEndpoint> healthyReplicas = getHealthyReplicas();
+
+        if (healthyReplicas.isEmpty()) {
+            return new OperationResult(false, "No healthy replicas available for " + operationDescription);
+        }
+
+        // Seleccionar UNA réplica coordinadora usando la estrategia configurada
+        ReplicaEndpoint coordinatorReplica = selectCoordinatorReplica(healthyReplicas);
+
+        LOGGER.info("🎯 Selected coordinator replica: " + coordinatorReplica.getEndpoint() + " for " + operationDescription);
+
+        // Enviar operación solo al coordinador
+        for (int attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                LOGGER.info("🔗 Attempting " + operationDescription + " on coordinator: " + coordinatorReplica.getEndpoint() +
+                        " (attempt " + attempt + "/" + maxRetries + ")");
+
+                OperationResult result = sendMessageToReplica(coordinatorReplica, message, operationDescription);
+
+                if (result.isSuccess()) {
+                    coordinatorReplica.recordSuccess();
+                    LOGGER.info("✅ " + operationDescription + " completed successfully via coordinator: " + coordinatorReplica.getEndpoint());
+                    return result;
+                } else {
+                    coordinatorReplica.recordFailure();
+                    LOGGER.warning("❌ " + operationDescription + " failed on coordinator " + coordinatorReplica.getEndpoint() + ": " + result.getMessage());
+
+                    // Si falla el coordinador, intentar con otro
+                    if (attempt < maxRetries) {
+                        healthyReplicas.remove(coordinatorReplica);
+                        if (!healthyReplicas.isEmpty()) {
+                            coordinatorReplica = selectCoordinatorReplica(healthyReplicas);
+                            LOGGER.info("🔄 Switching to new coordinator: " + coordinatorReplica.getEndpoint());
+                        }
+                    }
+                }
+
+            } catch (Exception e) {
+                coordinatorReplica.recordFailure();
+                LOGGER.log(Level.WARNING, "❌ Connection error to coordinator " + coordinatorReplica.getEndpoint(), e);
+
+                // Cambiar coordinador para el siguiente intento
+                if (attempt < maxRetries) {
+                    healthyReplicas.remove(coordinatorReplica);
+                    if (!healthyReplicas.isEmpty()) {
+                        coordinatorReplica = selectCoordinatorReplica(healthyReplicas);
+                    } else {
+                        break; // No hay más réplicas disponibles
+                    }
+                }
+            }
+
+            if (attempt < maxRetries) {
+                try {
+                    Thread.sleep(1000 * attempt); // Backoff
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+        }
+
+        return new OperationResult(false, "Failed to execute " + operationDescription + " on any coordinator after " + maxRetries + " attempts");
+    }
+
+    /**
+     * 🔄 EJECUTAR OPERACIÓN CON FAILOVER (para lecturas y listados)
      */
     private OperationResult executeOperationWithFailover(ProtocolMessage message, String operationDescription) {
         List<ReplicaEndpoint> replicaOrder = selectReplicaOrder();
@@ -155,7 +229,7 @@ public class MultiReplicaFileClient {
         for (int attempt = 1; attempt <= maxRetries; attempt++) {
             for (ReplicaEndpoint replica : replicaOrder) {
                 if (!replica.isHealthy()) {
-                    continue; // Saltar réplicas no saludables
+                    continue;
                 }
 
                 try {
@@ -182,7 +256,7 @@ public class MultiReplicaFileClient {
 
             if (attempt < maxRetries) {
                 try {
-                    Thread.sleep(1000 * attempt); // Backoff exponencial
+                    Thread.sleep(1000 * attempt);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     break;
@@ -190,8 +264,7 @@ public class MultiReplicaFileClient {
             }
         }
 
-        String errorMsg = "All replicas failed for " + operationDescription +
-                " after " + maxRetries + " attempts";
+        String errorMsg = "All replicas failed for " + operationDescription + " after " + maxRetries + " attempts";
         if (lastException != null) {
             errorMsg += ": " + lastException.getMessage();
         }
@@ -201,26 +274,98 @@ public class MultiReplicaFileClient {
     }
 
     /**
+     * 🎯 SELECCIONAR RÉPLICA COORDINADORA
+     */
+    private ReplicaEndpoint selectCoordinatorReplica(List<ReplicaEndpoint> healthyReplicas) {
+        switch (loadBalancing) {
+            case PREFERRED:
+                return healthyReplicas.stream()
+                        .filter(ReplicaEndpoint::isPreferred)
+                        .findFirst()
+                        .orElse(healthyReplicas.get(0));
+
+            case RANDOM:
+                return healthyReplicas.get(ThreadLocalRandom.current().nextInt(healthyReplicas.size()));
+
+            case ROUND_ROBIN:
+            default:
+                ReplicaEndpoint selected = healthyReplicas.get(currentReplicaIndex % healthyReplicas.size());
+                currentReplicaIndex = (currentReplicaIndex + 1) % healthyReplicas.size();
+                return selected;
+        }
+    }
+
+    /**
+     * 🔍 OBTENER RÉPLICAS SALUDABLES
+     */
+    private List<ReplicaEndpoint> getHealthyReplicas() {
+        List<ReplicaEndpoint> healthy = new ArrayList<>();
+        for (ReplicaEndpoint replica : availableReplicas) {
+            if (replica.isHealthy()) {
+                healthy.add(replica);
+            }
+        }
+
+        // Si no hay réplicas saludables, intentar con todas
+        if (healthy.isEmpty()) {
+            LOGGER.warning("⚠️ No healthy replicas found, trying all replicas");
+            return new ArrayList<>(availableReplicas);
+        }
+
+        return healthy;
+    }
+
+    /**
+     * 🔄 SELECCIONAR ORDEN DE RÉPLICAS
+     */
+    private List<ReplicaEndpoint> selectReplicaOrder() {
+        List<ReplicaEndpoint> healthyReplicas = getHealthyReplicas();
+
+        switch (loadBalancing) {
+            case PREFERRED:
+                healthyReplicas.sort((a, b) -> {
+                    if (a.isPreferred() && !b.isPreferred()) return -1;
+                    if (!a.isPreferred() && b.isPreferred()) return 1;
+                    return Double.compare(b.getHealthScore(), a.getHealthScore());
+                });
+                break;
+
+            case RANDOM:
+                Collections.shuffle(healthyReplicas);
+                break;
+
+            case ROUND_ROBIN:
+            default:
+                if (!healthyReplicas.isEmpty()) {
+                    int offset = currentReplicaIndex % healthyReplicas.size();
+                    Collections.rotate(healthyReplicas, -offset);
+                    currentReplicaIndex = (currentReplicaIndex + 1) % healthyReplicas.size();
+                }
+                break;
+        }
+
+        return healthyReplicas;
+    }
+
+    /**
      * 📨 ENVIAR MENSAJE A UNA RÉPLICA ESPECÍFICA
      */
     private OperationResult sendMessageToReplica(ReplicaEndpoint replica, ProtocolMessage message, String operationDescription) {
         Socket socket = null;
         try {
             socket = new Socket();
-            socket.connect(new java.net.InetSocketAddress(replica.getHost(), replica.getPort()), connectionTimeoutMs);
-            socket.setSoTimeout(readTimeoutMs);
+            socket.connect(new java.net.InetSocketAddress(replica.getHost(), replica.getPort()), config.getConnectionTimeoutMs());
+            socket.setSoTimeout(config.getReadTimeoutMs());
 
             try (PrintWriter writer = new PrintWriter(socket.getOutputStream(), true);
                  BufferedReader reader = new BufferedReader(new InputStreamReader(socket.getInputStream()))) {
 
-                // Enviar mensaje
                 String serializedMessage = message.toString();
                 LOGGER.fine("📤 Sending to " + replica.getEndpoint() + ": " + message.toDebugString());
 
                 writer.println(serializedMessage);
                 writer.flush();
 
-                // Leer respuesta
                 String responseStr = reader.readLine();
 
                 if (responseStr == null || responseStr.trim().isEmpty()) {
@@ -229,7 +374,6 @@ public class MultiReplicaFileClient {
 
                 LOGGER.fine("📥 Received from " + replica.getEndpoint() + ": " + responseStr);
 
-                // Parsear respuesta
                 ProtocolMessage response = ProtocolMessage.fromString(responseStr);
                 return processServerResponse(response, operationDescription, replica.getEndpoint());
             }
@@ -249,46 +393,6 @@ public class MultiReplicaFileClient {
                 }
             }
         }
-    }
-
-    /**
-     * 🔄 SELECCIONAR ORDEN DE RÉPLICAS SEGÚN ESTRATEGIA
-     */
-    private List<ReplicaEndpoint> selectReplicaOrder() {
-        List<ReplicaEndpoint> healthyReplicas = availableReplicas.stream()
-                .filter(ReplicaEndpoint::isHealthy)
-                .collect(ArrayList::new, (list, replica) -> list.add(replica), ArrayList::addAll);
-
-        if (healthyReplicas.isEmpty()) {
-            // Si no hay réplicas saludables, intentar con todas
-            healthyReplicas = new ArrayList<>(availableReplicas);
-        }
-
-        switch (loadBalancing) {
-            case PREFERRED:
-                // Ordenar por preferencia, luego por salud
-                healthyReplicas.sort((a, b) -> {
-                    if (a.isPreferred() && !b.isPreferred()) return -1;
-                    if (!a.isPreferred() && b.isPreferred()) return 1;
-                    return Double.compare(b.getHealthScore(), a.getHealthScore());
-                });
-                break;
-
-            case RANDOM:
-                Collections.shuffle(healthyReplicas);
-                break;
-
-            case ROUND_ROBIN:
-            default:
-                // Para round robin, rotar la lista
-                if (!healthyReplicas.isEmpty()) {
-                    int offset = (int) (System.currentTimeMillis() % healthyReplicas.size());
-                    Collections.rotate(healthyReplicas, -offset);
-                }
-                break;
-        }
-
-        return healthyReplicas;
     }
 
     /**
@@ -323,38 +427,13 @@ public class MultiReplicaFileClient {
         }
     }
 
-    /**
-     * 🏥 VERIFICAR SALUD DE TODAS LAS RÉPLICAS
-     */
-    public void checkReplicaHealth() {
-        LOGGER.info("🏥 Checking health of " + availableReplicas.size() + " replicas");
-
-        for (ReplicaEndpoint replica : availableReplicas) {
-            checkSingleReplicaHealth(replica);
-        }
-    }
-
-    /**
-     * 🏥 VERIFICAR SALUD DE UNA RÉPLICA
-     */
-    private void checkSingleReplicaHealth(ReplicaEndpoint replica) {
-        try (Socket testSocket = new Socket()) {
-            testSocket.connect(new java.net.InetSocketAddress(replica.getHost(), replica.getPort()), 3000);
-            replica.recordSuccess();
-            LOGGER.fine("✅ Health check passed: " + replica.getEndpoint());
-        } catch (Exception e) {
-            replica.recordFailure();
-            LOGGER.fine("❌ Health check failed: " + replica.getEndpoint() + " - " + e.getMessage());
-        }
-    }
-
-    // Getters
+    // Getters y demás métodos permanecen igual...
     public List<ReplicaEndpoint> getAvailableReplicas() { return new ArrayList<>(availableReplicas); }
     public String getClientId() { return clientId; }
     public LoadBalancingStrategy getLoadBalancingStrategy() { return loadBalancing; }
 
     /**
-     * 🔗 CLASE INTERNA: ReplicaEndpoint
+     * 🔗 CLASE INTERNA: ReplicaEndpoint (sin cambios)
      */
     public static class ReplicaEndpoint {
         private final String host;

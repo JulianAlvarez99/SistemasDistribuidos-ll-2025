@@ -19,7 +19,7 @@ public class ActiveReplicaServerApp {
             config = SystemConfig.getInstance();
 
             // Parse argumentos con fallbacks configurables
-            int port = parsePortArgument(args);
+            int port = 8082;//parsePortArgument(args);
             String storageDir = parseStorageDirectory(args, port);
 
             // Mostrar configuración
@@ -140,15 +140,42 @@ public class ActiveReplicaServerApp {
                 System.out.println("🔗 Attempting to connect to replica: " + host + ":" + port);
                 server.addReplica(host, port);
                 System.out.println("✅ Connected to replica: " + host + ":" + port);
+
+                // Programar verificación periódica de la conexión
+                scheduleConnectionMonitoring(host, port);
+
             } catch (Exception e) {
                 System.err.println("❌ Failed to connect to replica " + host + ":" + port + ": " + e.getMessage());
 
-                // Programar reintento con backoff exponencial
-                long retryDelay = Math.min(delayMs * 2, 300000); // Max 5 minutos
+                // Programar reintento con backoff exponencial limitado
+                long retryDelay = Math.min(delayMs * 2, 60000); // Max 1 minuto
                 System.out.println("⏰ Retrying connection in " + (retryDelay / 1000) + " seconds...");
                 scheduleReplicaConnection(host, port, retryDelay);
             }
         }, delayMs, TimeUnit.MILLISECONDS);
+    }
+
+    /**
+     * 🔄 PROGRAMAR MONITOREO DE CONEXIÓN
+     */
+    private static void scheduleConnectionMonitoring(String host, int port) {
+        monitoringService.scheduleAtFixedRate(() -> {
+            if (!running) return;
+
+            try {
+                // Verificar si la conexión sigue activa
+                var stats = server.getServerStatistics();
+                int activeReplicas = (Integer) stats.get("activeReplicas");
+
+                if (activeReplicas == 0) {
+                    System.out.println("🔄 No active replicas detected, attempting reconnection...");
+                    scheduleReplicaConnection(host, port, 5000); // Reconectar en 5 segundos
+                }
+
+            } catch (Exception e) {
+                System.err.println("Error in connection monitoring: " + e.getMessage());
+            }
+        }, 60, 60, TimeUnit.SECONDS); // Cada minuto
     }
 
     /**

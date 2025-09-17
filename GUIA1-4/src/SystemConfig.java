@@ -13,7 +13,7 @@ public class SystemConfig {
     private final Properties properties;
 
     // Configuraciones por defecto
-    public static final String DEFAULT_STORAGE_BASE_PATH = "C:/Users/julia/OneDrive/Desktop/RepoMaster";
+    public static final String DEFAULT_STORAGE_BASE_PATH = "C:/Users/julia/OneDrive/Desktop/RepoMaster/distributed_storage";
     public static final int DEFAULT_LOCK_TIMEOUT_MS = 30000;
     public static final int DEFAULT_SYNC_TIMEOUT_MS = 15000;
     public static final int DEFAULT_CONNECTION_TIMEOUT_MS = 10000;
@@ -40,28 +40,28 @@ public class SystemConfig {
         properties.setProperty("storage.replica.prefix", "replica_");
         properties.setProperty("storage.backup.suffix", "_backup");
 
-        // Timeouts (milliseconds)
-        properties.setProperty("timeout.lock.ms", String.valueOf(DEFAULT_LOCK_TIMEOUT_MS));
-        properties.setProperty("timeout.sync.ms", String.valueOf(DEFAULT_SYNC_TIMEOUT_MS));
-        properties.setProperty("timeout.connection.ms", String.valueOf(DEFAULT_CONNECTION_TIMEOUT_MS));
-        properties.setProperty("timeout.read.ms", String.valueOf(DEFAULT_CONNECTION_TIMEOUT_MS));
+        // Timeouts (milliseconds) - Más largos para debugging
+        properties.setProperty("timeout.lock.ms", String.valueOf(60000)); // 1 minuto
+        properties.setProperty("timeout.sync.ms", String.valueOf(30000)); // 30 segundos
+        properties.setProperty("timeout.connection.ms", String.valueOf(15000)); // 15 segundos
+        properties.setProperty("timeout.read.ms", String.valueOf(15000)); // 15 segundos
 
         // Intervals (seconds)
         properties.setProperty("interval.health.check.sec", String.valueOf(DEFAULT_HEALTH_CHECK_INTERVAL_SEC));
         properties.setProperty("interval.cleanup.sec", String.valueOf(DEFAULT_CLEANUP_INTERVAL_SEC));
 
-        // Retry and reliability
+        // Retry and reliability - Más permisivo para desarrollo
         properties.setProperty("retry.max.attempts", String.valueOf(DEFAULT_MAX_RETRIES));
-        properties.setProperty("consensus.require.unanimity", "true");
+        properties.setProperty("consensus.require.unanimity", "false"); // Cambiar a mayoría por ahora
         properties.setProperty("replication.verify.writes", "true");
 
         // Network
         properties.setProperty("network.default.ports", "8080,8081,8082");
         properties.setProperty("network.default.host", "localhost");
 
-        // Logging
+        // Logging - Más verbose para debugging
         properties.setProperty("logging.level", "INFO");
-        properties.setProperty("logging.enable.debug", "false");
+        properties.setProperty("logging.enable.debug", "true");
     }
 
     private void loadConfigurationFile() {
