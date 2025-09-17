@@ -21,20 +21,45 @@ public class ProtocolMessage {
     }
 
     // Getters and Setters
-    public ProtocolCommand getCommand() { return command; }
-    public void setCommand(ProtocolCommand command) { this.command = command; }
+    public ProtocolCommand getCommand() {
+        return command;
+    }
 
-    public String getFileName() { return fileName; }
-    public void setFileName(String fileName) { this.fileName = fileName; }
+    public void setCommand(ProtocolCommand command) {
+        this.command = command;
+    }
 
-    public String getContent() { return content; }
-    public void setContent(String content) { this.content = content; }
+    public String getFileName() {
+        return fileName;
+    }
 
-    public String getTimestamp() { return timestamp; }
-    public void setTimestamp(String timestamp) { this.timestamp = timestamp; }
+    public void setFileName(String fileName) {
+        this.fileName = fileName;
+    }
 
-    public String getClientId() { return clientId; }
-    public void setClientId(String clientId) { this.clientId = clientId; }
+    public String getContent() {
+        return content;
+    }
+
+    public void setContent(String content) {
+        this.content = content;
+    }
+
+    public String getTimestamp() {
+        return timestamp;
+    }
+
+    public void setTimestamp(String timestamp) {
+        this.timestamp = timestamp;
+    }
+
+    public String getClientId() {
+        return clientId;
+    }
+
+    public void setClientId(String clientId) {
+        this.clientId = clientId;
+    }
 
     /**
      * 🔧 SERIALIZACIÓN CORREGIDA: Formato simple y confiable
@@ -187,58 +212,5 @@ public class ProtocolMessage {
                 content != null ? content.length() : 0,
                 timestamp != null ? timestamp.substring(Math.max(0, timestamp.length() - 10)) : "null", // Solo últimos 10 chars
                 clientId != null ? clientId : "null");
-    }
-
-    /**
-     * 🧪 MÉTODO DE TESTING ESTÁTICO
-     */
-    public static void runTests() {
-        System.out.println("🧪 Running ProtocolMessage tests...");
-
-        // Test 1: LIST command
-        testCommand(ProtocolCommand.LIST, null, null, "LIST test");
-
-        // Test 2: WRITE command
-        testCommand(ProtocolCommand.WRITE, "test.txt", "Hello\nWorld!", "WRITE test");
-
-        // Test 3: READ command  
-        testCommand(ProtocolCommand.READ, "test.txt", null, "READ test");
-
-        // Test 4: DELETE command
-        testCommand(ProtocolCommand.DELETE, "test.txt", null, "DELETE test");
-
-        // Test 5: Content with special characters
-        testCommand(ProtocolCommand.WRITE, "special.txt", "Content with | pipes and \n newlines", "Special chars test");
-
-        System.out.println("✅ All tests completed");
-    }
-
-    private static void testCommand(ProtocolCommand cmd, String fileName, String content, String testName) {
-        try {
-            // Create message
-            ProtocolMessage original = new ProtocolMessage(cmd, fileName, content);
-            original.setClientId("TEST_CLIENT");
-
-            // Serialize
-            String serialized = original.toString();
-            System.out.println(testName + " serialized: " + serialized);
-
-            // Deserialize
-            ProtocolMessage deserialized = fromString(serialized);
-
-            // Compare
-            boolean success = original.getCommand() == deserialized.getCommand() &&
-                    equals(original.getFileName(), deserialized.getFileName()) &&
-                    equals(original.getContent(), deserialized.getContent());
-
-            System.out.println(testName + ": " + (success ? "✅ PASS" : "❌ FAIL"));
-
-        } catch (Exception e) {
-            System.out.println(testName + ": ❌ EXCEPTION - " + e.getMessage());
-        }
-    }
-
-    private static boolean equals(String a, String b) {
-        return (a == null && b == null) || (a != null && a.equals(b));
     }
 }

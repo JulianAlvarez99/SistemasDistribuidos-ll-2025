@@ -1,45 +1,73 @@
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.Logger;
 import java.util.logging.Level;
 
 /**
- * 🔄 ACTIVE REPLICATION MANAGER
- * Maneja la sincronización activa entre todos los servidores réplica
- * Implementa total order broadcast para mantener consistencia
+ * 🔄 ENHANCED ACTIVE REPLICATION MANAGER
+ * Maneja sincronización activa con algoritmo optimizado y configuración centralizada
  */
 public class ActiveReplicationManager {
     private static final Logger LOGGER = Logger.getLogger(ActiveReplicationManager.class.getName());
 
     private final String serverId;
+    private final SystemConfig config;
     private final List<DistributedLockManager.ServerConnection> replicaServers;
     private final ExecutorService syncExecutor;
-    private final AtomicInteger operationCounter;
+    private final ScheduledExecutorService maintenanceExecutor;
+    private final AtomicLong operationCounter;
     private final Map<String, OperationHistory> operationHistory;
-    private final int syncTimeoutMs;
-    private final int maxRetries;
+    private final Map<String, CompletableFuture<Boolean>> pendingSyncs;
+    private final ReplicationMetrics metrics;
 
     public ActiveReplicationManager(String serverId) {
         this.serverId = serverId;
+        this.config = SystemConfig.getInstance();
         this.replicaServers = new CopyOnWriteArrayList<>();
         this.syncExecutor = Executors.newCachedThreadPool();
-        this.operationCounter = new AtomicInteger(0);
+        this.maintenanceExecutor = Executors.newScheduledThreadPool(1);
+        this.operationCounter = new AtomicLong(0);
         this.operationHistory = new ConcurrentHashMap<>();
-        this.syncTimeoutMs = 15000; // 15 segundos
-        this.maxRetries = 3;
+        this.pendingSyncs = new ConcurrentHashMap<>();
+        this.metrics = new ReplicationMetrics();
+
+        startMaintenanceServices();
     }
 
     /**
-     * 🔄 SINCRONIZAR OPERACIÓN CON TODAS LAS RÉPLICAS
-     * Este es el método principal para redundancia activa
+     * 🔧 SERVICIOS DE MANTENIMIENTO
+     */
+    private void startMaintenanceServices() {
+        // Limpieza de historial cada 5 minutos
+        maintenanceExecutor.scheduleAtFixedRate(() -> {
+            try {
+                cleanupOldOperations();
+            } catch (Exception e) {
+                LOGGER.log(Level.WARNING, "Error during operation cleanup", e);
+            }
+        }, config.getCleanupIntervalSec(), config.getCleanupIntervalSec(), TimeUnit.SECONDS);
+
+        // Verificación de sincronizaciones pendientes cada 2 minutos
+        maintenanceExecutor.scheduleAtFixedRate(() -> {
+            try {
+                checkPendingSynchronizations();
+            } catch (Exception e) {
+                LOGGER.log(Level.WARNING, "Error checking pending syncs", e);
+            }
+        }, 120, 120, TimeUnit.SECONDS);
+    }
+
+    /**
+     * 🔄 SINCRONIZAR OPERACIÓN - Funcion principal para redundancia activa
      */
     public boolean synchronizeOperation(String fileName, ProtocolCommand operation, String content) {
-        int operationId = operationCounter.incrementAndGet();
+        long operationId = operationCounter.incrementAndGet();
         String operationKey = serverId + "_" + operationId;
 
-        LOGGER.info("🔄 Synchronizing operation: " + operation + " on " + fileName +
-                " (OpID: " + operationKey + ") with " + replicaServers.size() + " replicas");
+        LOGGER.info("🔄 [Op:" + operationId + "] Starting synchronization: " + operation +
+                " on '" + fileName + "' with " + replicaServers.size() + " replicas");
 
         // Crear registro de operación
         OperationHistory opHistory = new OperationHistory(
@@ -48,66 +76,80 @@ public class ActiveReplicationManager {
         operationHistory.put(operationKey, opHistory);
 
         if (replicaServers.isEmpty()) {
-            LOGGER.info("✅ No replicas to sync - operation completed locally");
+            LOGGER.info("✅ [Op:" + operationId + "] No replicas to sync - operation completed locally");
+            metrics.recordSuccessfulSync();
             return true;
         }
 
         try {
-            return performTotalOrderBroadcast(opHistory);
+            // Ejecutar algoritmo de replicación activa
+            boolean success = performActiveReplication(opHistory);
+
+            if (success) {
+                metrics.recordSuccessfulSync();
+            } else {
+                metrics.recordFailedSync();
+            }
+
+            return success;
+
         } catch (Exception e) {
-            LOGGER.log(Level.SEVERE, "❌ Error during operation synchronization", e);
+            LOGGER.log(Level.SEVERE, "❌ [Op:" + operationId + "] Error during synchronization", e);
+            metrics.recordFailedSync();
             return false;
         }
     }
 
     /**
-     * 📢 TOTAL ORDER BROADCAST
-     * Garantiza que todas las réplicas ejecuten operaciones en el mismo orden
+     * 🔄 EJECUTAR REPLICACIÓN ACTIVA - Algoritmo en 3 fases
      */
-    private boolean performTotalOrderBroadcast(OperationHistory operation) {
-        LOGGER.info("📢 Broadcasting operation: " + operation.getOperationKey());
+    private boolean performActiveReplication(OperationHistory operation) {
+        long operationId = extractOperationId(operation.getOperationKey());
 
-        // Fase 1: Proponer la operación a todas las réplicas
-        Map<String, CompletableFuture<Boolean>> proposalFutures = new HashMap<>();
+        try {
+            LOGGER.info("📢 [Op:" + operationId + "] Phase 1: Broadcasting operation proposal");
+
+            // FASE 1: Propuesta y validación
+            Map<String, CompletableFuture<ProposalResult>> proposalFutures = sendProposalsToAllReplicas(operation);
+
+            // FASE 2: Evaluación de consenso
+            ConsensusResult consensus = evaluateProposalConsensus(proposalFutures, operationId);
+
+            if (consensus.isSuccessful()) {
+                // FASE 3: Confirmación y aplicación
+                return commitOperationToAllReplicas(operation, consensus.getSuccessfulReplicas());
+            } else {
+                // FASE 3: Abortar operación
+                abortOperationOnAllReplicas(operation, consensus.getFailedReplicas());
+                return false;
+            }
+
+        } catch (Exception e) {
+            LOGGER.log(Level.SEVERE, "❌ [Op:" + operationId + "] Active replication failed", e);
+            return false;
+        }
+    }
+
+    /**
+     * 💭 ENVIAR PROPUESTAS A TODAS LAS RÉPLICAS
+     */
+    private Map<String, CompletableFuture<ProposalResult>> sendProposalsToAllReplicas(OperationHistory operation) {
+        Map<String, CompletableFuture<ProposalResult>> futures = new ConcurrentHashMap<>();
 
         for (DistributedLockManager.ServerConnection replica : replicaServers) {
-            CompletableFuture<Boolean> future = CompletableFuture.supplyAsync(() ->
-                    proposeOperationToReplica(replica, operation), syncExecutor);
-            proposalFutures.put(replica.getServerId(), future);
+            CompletableFuture<ProposalResult> future = CompletableFuture.supplyAsync(() ->
+                    sendProposalToReplica(replica, operation), syncExecutor);
+            futures.put(replica.getServerId(), future);
         }
 
-        // Fase 2: Esperar acknowledgment de todas las réplicas
-        int successfulProposals = 0;
-        for (Map.Entry<String, CompletableFuture<Boolean>> entry : proposalFutures.entrySet()) {
-            try {
-                boolean success = entry.getValue().get(syncTimeoutMs, TimeUnit.MILLISECONDS);
-                if (success) {
-                    successfulProposals++;
-                } else {
-                    LOGGER.warning("❌ Proposal failed for replica: " + entry.getKey());
-                }
-            } catch (Exception e) {
-                LOGGER.log(Level.WARNING, "❌ Error getting proposal result from: " + entry.getKey(), e);
-            }
-        }
-
-        // Fase 3: Decidir si proceder basado en mayoría o unanimidad
-        boolean proceedWithOperation = decideProceedBasedOnConsensus(successfulProposals, replicaServers.size());
-
-        if (proceedWithOperation) {
-            // Fase 4: Confirmar operación a todas las réplicas
-            return commitOperationToAllReplicas(operation);
-        } else {
-            // Fase 5: Abortar operación
-            abortOperationOnAllReplicas(operation);
-            return false;
-        }
+        return futures;
     }
 
     /**
-     * 💭 PROPONER OPERACIÓN A UNA RÉPLICA
+     * 💭 ENVIAR PROPUESTA A UNA RÉPLICA
      */
-    private boolean proposeOperationToReplica(DistributedLockManager.ServerConnection replica, OperationHistory operation) {
+    private ProposalResult sendProposalToReplica(DistributedLockManager.ServerConnection replica,
+                                                 OperationHistory operation) {
         try {
             ProtocolMessage proposal = new ProtocolMessage(
                     ProtocolCommand.OPERATION_PROPOSAL,
@@ -115,48 +157,119 @@ public class ActiveReplicationManager {
                     serializeOperation(operation)
             );
 
-            ProtocolMessage response = replica.sendMessageAndWaitResponse(proposal, syncTimeoutMs);
+            ProtocolMessage response = replica.sendMessageAndWaitResponse(
+                    proposal, config.getSyncTimeoutMs());
 
-            return response != null && response.getCommand() == ProtocolCommand.OPERATION_ACCEPTED;
+            if (response == null) {
+                return new ProposalResult(replica.getServerId(), false, "Timeout");
+            }
+
+            boolean accepted = response.getCommand() == ProtocolCommand.OPERATION_ACCEPTED;
+            String message = accepted ? "Accepted" : response.getContent();
+
+            return new ProposalResult(replica.getServerId(), accepted, message);
 
         } catch (Exception e) {
-            LOGGER.log(Level.WARNING, "Error proposing operation to replica: " + replica.getServerId(), e);
-            return false;
+            LOGGER.log(Level.WARNING, "Error sending proposal to: " + replica.getServerId(), e);
+            return new ProposalResult(replica.getServerId(), false, "Communication error: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 🗳️ EVALUAR CONSENSO DE PROPUESTAS
+     */
+    private ConsensusResult evaluateProposalConsensus(
+            Map<String, CompletableFuture<ProposalResult>> proposalFutures, long operationId) {
+
+        List<String> successfulReplicas = new ArrayList<>();
+        List<String> failedReplicas = new ArrayList<>();
+        int totalReplicas = proposalFutures.size();
+
+        // Esperar todas las respuestas con timeout
+        for (Map.Entry<String, CompletableFuture<ProposalResult>> entry : proposalFutures.entrySet()) {
+            try {
+                ProposalResult result = entry.getValue().get(config.getSyncTimeoutMs(), TimeUnit.MILLISECONDS);
+
+                if (result.isAccepted()) {
+                    successfulReplicas.add(result.getReplicaId());
+                } else {
+                    failedReplicas.add(result.getReplicaId());
+                    LOGGER.warning("❌ [Op:" + operationId + "] Proposal rejected by " +
+                            result.getReplicaId() + ": " + result.getMessage());
+                }
+
+            } catch (Exception e) {
+                String replicaId = entry.getKey();
+                failedReplicas.add(replicaId);
+                LOGGER.log(Level.WARNING, "❌ [Op:" + operationId + "] Proposal error from: " + replicaId, e);
+            }
+        }
+
+        // Evaluar si se puede proceder
+        boolean canProceed = evaluateConsensusDecision(successfulReplicas.size(), totalReplicas);
+
+        LOGGER.info("🗳️ [Op:" + operationId + "] Consensus evaluation: " +
+                successfulReplicas.size() + "/" + totalReplicas + " accepted - " +
+                (canProceed ? "PROCEED" : "ABORT"));
+
+        return new ConsensusResult(canProceed, successfulReplicas, failedReplicas);
+    }
+
+    /**
+     * 🎯 EVALUAR DECISIÓN DE CONSENSO
+     */
+    private boolean evaluateConsensusDecision(int acceptances, int totalReplicas) {
+        if (config.requireUnanimousConsensus()) {
+            return acceptances == totalReplicas;
+        } else {
+            return acceptances > totalReplicas / 2;
         }
     }
 
     /**
      * ✅ CONFIRMAR OPERACIÓN EN TODAS LAS RÉPLICAS
      */
-    private boolean commitOperationToAllReplicas(OperationHistory operation) {
-        LOGGER.info("✅ Committing operation to all replicas: " + operation.getOperationKey());
+    private boolean commitOperationToAllReplicas(OperationHistory operation, List<String> targetReplicas) {
+        long operationId = extractOperationId(operation.getOperationKey());
+        LOGGER.info("✅ [Op:" + operationId + "] Committing operation to " + targetReplicas.size() + " replicas");
 
-        CountDownLatch commitLatch = new CountDownLatch(replicaServers.size());
+        CountDownLatch commitLatch = new CountDownLatch(targetReplicas.size());
         AtomicInteger successfulCommits = new AtomicInteger(0);
 
-        for (DistributedLockManager.ServerConnection replica : replicaServers) {
-            syncExecutor.submit(() -> {
-                try {
-                    if (commitOperationToReplica(replica, operation)) {
-                        successfulCommits.incrementAndGet();
+        for (String replicaId : targetReplicas) {
+            DistributedLockManager.ServerConnection replica = findReplicaById(replicaId);
+            if (replica != null) {
+                syncExecutor.submit(() -> {
+                    try {
+                        if (commitOperationToReplica(replica, operation)) {
+                            successfulCommits.incrementAndGet();
+                        }
+                    } finally {
+                        commitLatch.countDown();
                     }
-                } finally {
-                    commitLatch.countDown();
-                }
-            });
+                });
+            } else {
+                commitLatch.countDown();
+            }
         }
 
         try {
-            commitLatch.await(syncTimeoutMs, TimeUnit.MILLISECONDS);
+            boolean allCompleted = commitLatch.await(config.getSyncTimeoutMs(), TimeUnit.MILLISECONDS);
             int commits = successfulCommits.get();
 
-            LOGGER.info("Commit results: " + commits + "/" + replicaServers.size() + " successful");
+            if (!allCompleted) {
+                LOGGER.warning("⏰ [Op:" + operationId + "] Commit phase timeout");
+            }
 
-            // Para redundancia activa, necesitamos que todas las réplicas confirmen
-            return commits == replicaServers.size();
+            LOGGER.info("✅ [Op:" + operationId + "] Commit results: " + commits + "/" +
+                    targetReplicas.size() + " successful");
+
+            // Para redundancia activa, requerimos todos los commits exitosos
+            return commits == targetReplicas.size();
 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            LOGGER.warning("❌ [Op:" + operationId + "] Commit phase interrupted");
             return false;
         }
     }
@@ -164,7 +277,8 @@ public class ActiveReplicationManager {
     /**
      * ✅ CONFIRMAR OPERACIÓN EN UNA RÉPLICA
      */
-    private boolean commitOperationToReplica(DistributedLockManager.ServerConnection replica, OperationHistory operation) {
+    private boolean commitOperationToReplica(DistributedLockManager.ServerConnection replica,
+                                             OperationHistory operation) {
         try {
             ProtocolMessage commit = new ProtocolMessage(
                     ProtocolCommand.OPERATION_COMMIT,
@@ -172,11 +286,20 @@ public class ActiveReplicationManager {
                     serializeOperation(operation)
             );
 
-            ProtocolMessage response = replica.sendMessageAndWaitResponse(commit, syncTimeoutMs);
-            return response != null && response.getCommand() == ProtocolCommand.OPERATION_COMMITTED;
+            ProtocolMessage response = replica.sendMessageAndWaitResponse(
+                    commit, config.getSyncTimeoutMs());
+
+            boolean success = response != null &&
+                    response.getCommand() == ProtocolCommand.OPERATION_COMMITTED;
+
+            if (!success && response != null) {
+                LOGGER.warning("❌ Commit failed on " + replica.getServerId() + ": " + response.getContent());
+            }
+
+            return success;
 
         } catch (Exception e) {
-            LOGGER.log(Level.WARNING, "Error committing operation to replica: " + replica.getServerId(), e);
+            LOGGER.log(Level.WARNING, "❌ Error committing to replica: " + replica.getServerId(), e);
             return false;
         }
     }
@@ -184,8 +307,9 @@ public class ActiveReplicationManager {
     /**
      * ❌ ABORTAR OPERACIÓN EN TODAS LAS RÉPLICAS
      */
-    private void abortOperationOnAllReplicas(OperationHistory operation) {
-        LOGGER.warning("❌ Aborting operation on all replicas: " + operation.getOperationKey());
+    private void abortOperationOnAllReplicas(OperationHistory operation, List<String> targetReplicas) {
+        long operationId = extractOperationId(operation.getOperationKey());
+        LOGGER.warning("❌ [Op:" + operationId + "] Aborting operation on " + targetReplicas.size() + " replicas");
 
         ProtocolMessage abort = new ProtocolMessage(
                 ProtocolCommand.OPERATION_ABORT,
@@ -193,34 +317,18 @@ public class ActiveReplicationManager {
                 operation.getOperationKey()
         );
 
-        for (DistributedLockManager.ServerConnection replica : replicaServers) {
-            syncExecutor.submit(() -> {
-                try {
-                    replica.sendMessage(abort);
-                } catch (Exception e) {
-                    LOGGER.log(Level.WARNING, "Error sending abort to replica: " + replica.getServerId(), e);
-                }
-            });
+        for (String replicaId : targetReplicas) {
+            DistributedLockManager.ServerConnection replica = findReplicaById(replicaId);
+            if (replica != null) {
+                syncExecutor.submit(() -> {
+                    try {
+                        replica.sendMessage(abort);
+                    } catch (Exception e) {
+                        LOGGER.log(Level.WARNING, "Error sending abort to: " + replicaId, e);
+                    }
+                });
+            }
         }
-    }
-
-    /**
-     * 🗳️ DECIDIR SI PROCEDER BASADO EN CONSENSO
-     */
-    private boolean decideProceedBasedOnConsensus(int approvals, int totalReplicas) {
-        // Para redundancia activa fuerte, requerimos unanimidad
-        // Para redundancia activa débil, podríamos usar mayoría
-
-        // Configuración: Unanimidad estricta
-        boolean unanimous = approvals == totalReplicas;
-
-        // Configuración alternativa: Mayoría simple
-        // boolean majority = approvals > totalReplicas / 2;
-
-        LOGGER.info("🗳️ Consensus decision: " + approvals + "/" + totalReplicas +
-                " approvals - " + (unanimous ? "PROCEED" : "ABORT"));
-
-        return unanimous;
     }
 
     /**
@@ -229,26 +337,32 @@ public class ActiveReplicationManager {
     public ProtocolMessage processOperationProposal(ProtocolMessage proposal) {
         try {
             OperationHistory operation = deserializeOperation(proposal.getContent());
-            LOGGER.info("📥 Processing operation proposal: " + operation.getOperationKey());
+            long operationId = extractOperationId(operation.getOperationKey());
+
+            LOGGER.info("📥 [Op:" + operationId + "] Processing operation proposal from " +
+                    operation.getOriginServer() + " for: " + operation.getFileName());
 
             // Validar la propuesta
-            if (validateOperationProposal(operation)) {
-                // Registrar la operación como pendiente
+            ValidationResult validation = validateOperationProposal(operation);
+
+            if (validation.isValid()) {
+                // Registrar operación como pendiente
                 operationHistory.put(operation.getOperationKey(), operation);
 
-                LOGGER.info("✅ Operation proposal accepted: " + operation.getOperationKey());
+                LOGGER.info("✅ [Op:" + operationId + "] Operation proposal accepted");
                 return new ProtocolMessage(ProtocolCommand.OPERATION_ACCEPTED,
                         proposal.getFileName(), serverId);
             } else {
-                LOGGER.warning("❌ Operation proposal rejected: " + operation.getOperationKey());
+                LOGGER.warning("❌ [Op:" + operationId + "] Operation proposal rejected: " +
+                        validation.getReason());
                 return new ProtocolMessage(ProtocolCommand.OPERATION_REJECTED,
-                        proposal.getFileName(), "Validation failed");
+                        proposal.getFileName(), validation.getReason());
             }
 
         } catch (Exception e) {
             LOGGER.log(Level.WARNING, "Error processing operation proposal", e);
             return new ProtocolMessage(ProtocolCommand.OPERATION_REJECTED,
-                    proposal.getFileName(), "Processing error");
+                    proposal.getFileName(), "Processing error: " + e.getMessage());
         }
     }
 
@@ -258,17 +372,22 @@ public class ActiveReplicationManager {
     public ProtocolMessage processOperationCommit(ProtocolMessage commit, FileSystemManager fileManager) {
         try {
             OperationHistory operation = deserializeOperation(commit.getContent());
-            LOGGER.info("📥 Processing operation commit: " + operation.getOperationKey());
+            long operationId = extractOperationId(operation.getOperationKey());
 
-            // Ejecutar la operación localmente
+            LOGGER.info("📥 [Op:" + operationId + "] Processing operation commit from " +
+                    operation.getOriginServer() + " for: " + operation.getFileName());
+
+            // Ejecutar operación localmente
             OperationResult result = executeOperationLocally(operation, fileManager);
 
             if (result.isSuccess()) {
-                LOGGER.info("✅ Operation committed successfully: " + operation.getOperationKey());
+                LOGGER.info("✅ [Op:" + operationId + "] Operation committed successfully");
+                metrics.recordSuccessfulCommit();
                 return new ProtocolMessage(ProtocolCommand.OPERATION_COMMITTED,
                         commit.getFileName(), serverId);
             } else {
-                LOGGER.warning("❌ Operation commit failed: " + operation.getOperationKey() + " - " + result.getMessage());
+                LOGGER.warning("❌ [Op:" + operationId + "] Operation commit failed: " + result.getMessage());
+                metrics.recordFailedCommit();
                 return new ProtocolMessage(ProtocolCommand.OPERATION_FAILED,
                         commit.getFileName(), result.getMessage());
             }
@@ -276,7 +395,7 @@ public class ActiveReplicationManager {
         } catch (Exception e) {
             LOGGER.log(Level.SEVERE, "Error processing operation commit", e);
             return new ProtocolMessage(ProtocolCommand.OPERATION_FAILED,
-                    commit.getFileName(), "Commit processing error");
+                    commit.getFileName(), "Commit processing error: " + e.getMessage());
         }
     }
 
@@ -286,7 +405,7 @@ public class ActiveReplicationManager {
     private OperationResult executeOperationLocally(OperationHistory operation, FileSystemManager fileManager) {
         switch (operation.getOperation()) {
             case WRITE:
-                return fileManager.writeFile(operation.getFileName(), operation.getContent());
+                return fileManager.replaceFileContent(operation.getFileName(), operation.getContent());
             case DELETE:
                 return fileManager.deleteFile(operation.getFileName());
             default:
@@ -297,34 +416,129 @@ public class ActiveReplicationManager {
     /**
      * ✅ VALIDAR PROPUESTA DE OPERACIÓN
      */
-    private boolean validateOperationProposal(OperationHistory operation) {
-        // Validaciones básicas
-        if (operation.getFileName() == null || operation.getFileName().isEmpty()) {
-            return false;
+    private ValidationResult validateOperationProposal(OperationHistory operation) {
+        // Validación básica de datos
+        if (operation.getFileName() == null || operation.getFileName().trim().isEmpty()) {
+            return new ValidationResult(false, "Invalid file name");
         }
 
         if (operation.getOperation() == null) {
-            return false;
+            return new ValidationResult(false, "Invalid operation");
         }
 
-        // Verificar que no sea una operación duplicada
-        return !operationHistory.containsKey(operation.getOperationKey());
+        // Verificar duplicados
+        if (operationHistory.containsKey(operation.getOperationKey())) {
+            return new ValidationResult(false, "Duplicate operation");
+        }
+
+        // Validaciones específicas por tipo de operación
+        switch (operation.getOperation()) {
+            case WRITE:
+                if (operation.getContent() == null) {
+                    return new ValidationResult(false, "Write operation requires content");
+                }
+                break;
+            case DELETE:
+                // Para DELETE no necesitamos contenido
+                break;
+            default:
+                return new ValidationResult(false, "Unsupported operation type");
+        }
+
+        return new ValidationResult(true, "Valid operation");
     }
 
     /**
-     * 🔗 AGREGAR SERVIDOR RÉPLICA
+     * 🧹 LIMPIAR OPERACIONES ANTIGUAS
+     */
+    private void cleanupOldOperations() {
+        long cutoffTime = System.currentTimeMillis() - (24 * 60 * 60 * 1000); // 24 horas
+
+        Iterator<Map.Entry<String, OperationHistory>> iterator = operationHistory.entrySet().iterator();
+        int removed = 0;
+
+        while (iterator.hasNext()) {
+            Map.Entry<String, OperationHistory> entry = iterator.next();
+            if (entry.getValue().getTimestamp() < cutoffTime) {
+                iterator.remove();
+                removed++;
+            }
+        }
+
+        if (removed > 0) {
+            LOGGER.info("🧹 Cleaned up " + removed + " old operations from history");
+        }
+    }
+
+    /**
+     * ⏰ VERIFICAR SINCRONIZACIONES PENDIENTES
+     */
+    private void checkPendingSynchronizations() {
+        if (pendingSyncs.isEmpty()) {
+            return;
+        }
+
+        LOGGER.fine("⏰ Checking " + pendingSyncs.size() + " pending synchronizations");
+
+        Iterator<Map.Entry<String, CompletableFuture<Boolean>>> iterator = pendingSyncs.entrySet().iterator();
+        int completed = 0;
+
+        while (iterator.hasNext()) {
+            Map.Entry<String, CompletableFuture<Boolean>> entry = iterator.next();
+            CompletableFuture<Boolean> future = entry.getValue();
+
+            if (future.isDone()) {
+                iterator.remove();
+                completed++;
+                try {
+                    boolean success = future.get();
+                    LOGGER.fine("⏰ Pending sync completed: " + entry.getKey() + " - " +
+                            (success ? "SUCCESS" : "FAILED"));
+                } catch (Exception e) {
+                    LOGGER.log(Level.WARNING, "Error getting pending sync result", e);
+                }
+            }
+        }
+
+        if (completed > 0) {
+            LOGGER.info("⏰ Completed " + completed + " pending synchronizations");
+        }
+    }
+
+    /**
+     * 🔗 GESTIÓN DE SERVIDORES RÉPLICA
      */
     public void addReplicaServer(DistributedLockManager.ServerConnection server) {
         replicaServers.add(server);
-        LOGGER.info("Added replica server: " + server.getServerId() + " (Total replicas: " + replicaServers.size() + ")");
+        LOGGER.info("🔗 Added replica server: " + server.getServerId() +
+                " (Total replicas: " + replicaServers.size() + ")");
+    }
+
+    public void removeReplicaServer(String serverId) {
+        boolean removed = replicaServers.removeIf(server -> server.getServerId().equals(serverId));
+        if (removed) {
+            LOGGER.info("🔗 Removed replica server: " + serverId +
+                    " (Total replicas: " + replicaServers.size() + ")");
+        }
     }
 
     /**
-     * 🔗 REMOVER SERVIDOR RÉPLICA
+     * 🔍 UTILIDADES
      */
-    public void removeReplicaServer(String serverId) {
-        replicaServers.removeIf(server -> server.getServerId().equals(serverId));
-        LOGGER.info("Removed replica server: " + serverId + " (Total replicas: " + replicaServers.size() + ")");
+    private DistributedLockManager.ServerConnection findReplicaById(String replicaId) {
+        return replicaServers.stream()
+                .filter(replica -> replica.getServerId().equals(replicaId))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private long extractOperationId(String operationKey) {
+        try {
+            String[] parts = operationKey.split("_");
+            return Long.parseLong(parts[parts.length - 1]);
+        } catch (Exception e) {
+            return 0;
+        }
     }
 
     /**
@@ -336,9 +550,14 @@ public class ActiveReplicationManager {
         stats.put("replicaCount", replicaServers.size());
         stats.put("operationHistorySize", operationHistory.size());
         stats.put("lastOperationId", operationCounter.get());
+        stats.put("pendingSyncs", pendingSyncs.size());
+        stats.putAll(metrics.getMetricsMap());
         return stats;
     }
 
+    /**
+     * 📝 SERIALIZACIÓN DE OPERACIONES
+     */
     private String serializeOperation(OperationHistory operation) {
         return String.format("%s|%s|%s|%s|%s|%d",
                 operation.getOperationKey(),
@@ -351,6 +570,10 @@ public class ActiveReplicationManager {
 
     private OperationHistory deserializeOperation(String serialized) {
         String[] parts = serialized.split("\\|", 6);
+        if (parts.length < 6) {
+            throw new IllegalArgumentException("Invalid serialized operation: " + serialized);
+        }
+
         return new OperationHistory(
                 parts[0], // operationKey
                 parts[1], // fileName
@@ -361,10 +584,76 @@ public class ActiveReplicationManager {
         );
     }
 
+    /**
+     * 🛑 SHUTDOWN
+     */
     public void shutdown() {
-        LOGGER.info("Shutting down ActiveReplicationManager");
+        LOGGER.info("🛑 Shutting down ActiveReplicationManager");
+
+        // Cancelar sincronizaciones pendientes
+        for (CompletableFuture<Boolean> future : pendingSyncs.values()) {
+            future.cancel(true);
+        }
+        pendingSyncs.clear();
+
+        // Shutdown executors
         if (syncExecutor != null) {
             syncExecutor.shutdown();
+            try {
+                if (!syncExecutor.awaitTermination(30, TimeUnit.SECONDS)) {
+                    syncExecutor.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                syncExecutor.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
+        }
+
+        if (maintenanceExecutor != null) {
+            maintenanceExecutor.shutdown();
+        }
+    }
+
+    /**
+     * 📊 CLASE INTERNA: ReplicationMetrics
+     */
+    private static class ReplicationMetrics {
+        private final AtomicLong totalSyncs = new AtomicLong(0);
+        private final AtomicLong successfulSyncs = new AtomicLong(0);
+        private final AtomicLong failedSyncs = new AtomicLong(0);
+        private final AtomicLong totalCommits = new AtomicLong(0);
+        private final AtomicLong successfulCommits = new AtomicLong(0);
+        private final AtomicLong failedCommits = new AtomicLong(0);
+
+        public void recordSuccessfulSync() {
+            totalSyncs.incrementAndGet();
+            successfulSyncs.incrementAndGet();
+        }
+
+        public void recordFailedSync() {
+            totalSyncs.incrementAndGet();
+            failedSyncs.incrementAndGet();
+        }
+
+        public void recordSuccessfulCommit() {
+            totalCommits.incrementAndGet();
+            successfulCommits.incrementAndGet();
+        }
+
+        public void recordFailedCommit() {
+            totalCommits.incrementAndGet();
+            failedCommits.incrementAndGet();
+        }
+
+        public Map<String, Object> getMetricsMap() {
+            Map<String, Object> metrics = new HashMap<>();
+            metrics.put("totalSyncs", totalSyncs.get());
+            metrics.put("successfulSyncs", successfulSyncs.get());
+            metrics.put("failedSyncs", failedSyncs.get());
+            metrics.put("totalCommits", totalCommits.get());
+            metrics.put("successfulCommits", successfulCommits.get());
+            metrics.put("failedCommits", failedCommits.get());
+            return metrics;
         }
     }
 
@@ -389,12 +678,65 @@ public class ActiveReplicationManager {
             this.timestamp = timestamp;
         }
 
-        // Getters
         public String getOperationKey() { return operationKey; }
         public String getFileName() { return fileName; }
         public ProtocolCommand getOperation() { return operation; }
         public String getContent() { return content; }
         public String getOriginServer() { return originServer; }
         public long getTimestamp() { return timestamp; }
+    }
+
+    /**
+     * 💭 CLASE INTERNA: ProposalResult
+     */
+    private static class ProposalResult {
+        private final String replicaId;
+        private final boolean accepted;
+        private final String message;
+
+        public ProposalResult(String replicaId, boolean accepted, String message) {
+            this.replicaId = replicaId;
+            this.accepted = accepted;
+            this.message = message;
+        }
+
+        public String getReplicaId() { return replicaId; }
+        public boolean isAccepted() { return accepted; }
+        public String getMessage() { return message; }
+    }
+
+    /**
+     * 🗳️ CLASE INTERNA: ConsensusResult
+     */
+    private static class ConsensusResult {
+        private final boolean successful;
+        private final List<String> successfulReplicas;
+        private final List<String> failedReplicas;
+
+        public ConsensusResult(boolean successful, List<String> successfulReplicas, List<String> failedReplicas) {
+            this.successful = successful;
+            this.successfulReplicas = new ArrayList<>(successfulReplicas);
+            this.failedReplicas = new ArrayList<>(failedReplicas);
+        }
+
+        public boolean isSuccessful() { return successful; }
+        public List<String> getSuccessfulReplicas() { return successfulReplicas; }
+        public List<String> getFailedReplicas() { return failedReplicas; }
+    }
+
+    /**
+     * ✅ CLASE INTERNA: ValidationResult
+     */
+    private static class ValidationResult {
+        private final boolean valid;
+        private final String reason;
+
+        public ValidationResult(boolean valid, String reason) {
+            this.valid = valid;
+            this.reason = reason;
+        }
+
+        public boolean isValid() { return valid; }
+        public String getReason() { return reason; }
     }
 }
