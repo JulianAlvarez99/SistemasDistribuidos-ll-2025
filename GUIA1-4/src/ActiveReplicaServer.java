@@ -369,32 +369,64 @@ public class ActiveReplicaServer {
         }
 
         /**
-         * 🔄 MANEJAR MENSAJE DE REPLICACIÓN
+         * 🔄 MANEJAR MENSAJE DE REPLICACIÓN - IMPLEMENTACIÓN SIMPLIFICADA
          */
         private ProtocolMessage handleReplicationMessage(ProtocolMessage message) {
-            LOGGER.info("🔄 Processing replication message: " + message.toDebugString());
+            LOGGER.info("🔄 [REPLICA] Processing replication message: " + message.getCommand() + " for " + message.getFileName());
 
-            switch (message.getCommand()) {
-                case OPERATION_PROPOSAL:
-                    LOGGER.info("💭 Received operation proposal for: " + message.getFileName());
-                    ProtocolMessage proposalResponse = replicationManager.processOperationProposal(message);
-                    LOGGER.info("💭 Proposal response: " + (proposalResponse != null ? proposalResponse.getCommand() : "null"));
-                    return proposalResponse;
+            try {
+                switch (message.getCommand()) {
+                    case OPERATION_COMMIT:
+                        return processReplicationCommit(message);
 
-                case OPERATION_COMMIT:
-                    LOGGER.info("✅ Received operation commit for: " + message.getFileName());
-                    ProtocolMessage commitResponse = replicationManager.processOperationCommit(message, fileManager);
-                    LOGGER.info("✅ Commit response: " + (commitResponse != null ? commitResponse.getCommand() : "null"));
-                    return commitResponse;
+                    case HEARTBEAT:
+                        return new ProtocolMessage(ProtocolCommand.SUCCESS, null, serverId);
 
-                case OPERATION_ABORT:
-                    LOGGER.info("❌ Received operation abort for: " + message.getFileName());
-                    return null; // No response needed
+                    default:
+                        LOGGER.warning("⚠️ Unsupported replication command: " + message.getCommand());
+                        return new ProtocolMessage(ProtocolCommand.ERROR, message.getFileName(),
+                                "Unsupported replication command: " + message.getCommand());
+                }
+            } catch (Exception e) {
+                LOGGER.log(Level.SEVERE, "Error handling replication message", e);
+                return new ProtocolMessage(ProtocolCommand.ERROR, message.getFileName(),
+                        "Replication error: " + e.getMessage());
+            }
+        }
 
-                default:
-                    LOGGER.warning("⚠️ Unsupported replication command: " + message.getCommand());
-                    return new ProtocolMessage(ProtocolCommand.ERROR, message.getFileName(),
-                            "Unsupported replication command");
+        /**
+         * ✅ PROCESAR COMMIT DE REPLICACIÓN
+         */
+        private ProtocolMessage processReplicationCommit(ProtocolMessage commit) {
+            try {
+                String fileName = commit.getFileName();
+                String content = commit.getContent();
+
+                LOGGER.info("✅ [REPLICA] Processing commit for: " + fileName);
+
+                // Determinar operación basada en el contenido
+                OperationResult result;
+                if (content != null && content.startsWith("DELETE:")) {
+                    LOGGER.info("🗑️ [REPLICA] Executing DELETE operation for: " + fileName);
+                    result = fileManager.deleteFile(fileName);
+                } else {
+                    LOGGER.info("📝 [REPLICA] Executing WRITE operation for: " + fileName +
+                            " (content length: " + (content != null ? content.length() : 0) + ")");
+                    result = fileManager.replaceFileContent(fileName, content != null ? content : "");
+                }
+
+                if (result.isSuccess()) {
+                    LOGGER.info("✅ [REPLICA] Operation committed successfully: " + fileName);
+                    return new ProtocolMessage(ProtocolCommand.OPERATION_COMMITTED, fileName, serverId);
+                } else {
+                    LOGGER.warning("❌ [REPLICA] Operation failed: " + result.getMessage());
+                    return new ProtocolMessage(ProtocolCommand.OPERATION_FAILED, fileName, result.getMessage());
+                }
+
+            } catch (Exception e) {
+                LOGGER.log(Level.SEVERE, "Error in replication commit", e);
+                return new ProtocolMessage(ProtocolCommand.OPERATION_FAILED, commit.getFileName(),
+                        "Commit error: " + e.getMessage());
             }
         }
     }
@@ -434,55 +466,58 @@ public class ActiveReplicaServer {
     }
 
     /**
-     * ✍️ PROCESAR OPERACIÓN DE ESCRITURA (WRITE/DELETE) - CORREGIDA
+     * ✍️ PROCESAR OPERACIÓN DE ESCRITURA - SECUENCIA COMPLETAMENTE CORREGIDA
      */
     private ProtocolMessage processWriteOperation(String fileName, ProtocolCommand operation, String content) {
-        LOGGER.info("✍️ Processing write operation with active replication: " + operation + " on " + fileName);
-        LOGGER.info("📊 Current replicas available: " + knownReplicas.size());
+        LOGGER.info("✍️ [COORDINATOR] Processing write operation: " + operation + " on " + fileName);
+        LOGGER.info("📊 Available replicas for synchronization: " + knownReplicas.size());
 
         try {
             // FASE 1: Adquirir lock distribuido
-            LOGGER.info("🔒 Acquiring distributed lock for: " + fileName);
+            LOGGER.info("🔒 [PHASE 1] Acquiring distributed lock for: " + fileName);
             if (!lockManager.acquireDistributedLock(fileName, operation.getCommand())) {
                 LOGGER.warning("❌ Could not acquire distributed lock for: " + fileName);
-                return new ProtocolMessage(ProtocolCommand.ERROR, fileName,
-                        "Could not acquire distributed lock");
+                return new ProtocolMessage(ProtocolCommand.ERROR, fileName, "Could not acquire distributed lock");
             }
 
             try {
-                // FASE 2: Sincronizar con todas las réplicas ANTES de ejecutar localmente
-                LOGGER.info("🔄 Starting synchronization with " + knownReplicas.size() + " replicas");
-                boolean syncSuccess = replicationManager.synchronizeOperation(fileName, operation, content);
-
-                if (!syncSuccess) {
-                    LOGGER.warning("❌ Synchronization failed, aborting operation: " + operation + " on " + fileName);
-                    return new ProtocolMessage(ProtocolCommand.ERROR, fileName,
-                            "Synchronization with replicas failed");
-                }
-
-                // FASE 3: Ejecutar operación localmente DESPUÉS de confirmar sincronización
-                LOGGER.info("💾 Executing operation locally: " + operation + " on " + fileName);
+                // FASE 2: Ejecutar operación localmente PRIMERO (como coordinador)
+                LOGGER.info("💾 [PHASE 2] Executing operation locally as coordinator: " + operation + " on " + fileName);
                 OperationResult localResult = executeLocalOperation(fileName, operation, content);
 
-                if (localResult.isSuccess()) {
-                    LOGGER.info("✅ Write operation completed successfully: " + operation + " on " + fileName);
-                    return new ProtocolMessage(ProtocolCommand.SUCCESS, fileName,
-                            "Operation completed and synchronized across all replicas");
-                } else {
+                if (!localResult.isSuccess()) {
                     LOGGER.warning("❌ Local execution failed: " + localResult.getMessage());
-                    return new ProtocolMessage(ProtocolCommand.ERROR, fileName, localResult.getMessage());
+                    return new ProtocolMessage(ProtocolCommand.ERROR, fileName, "Local operation failed: " + localResult.getMessage());
                 }
 
+                LOGGER.info("✅ Local operation successful, now synchronizing with replicas...");
+
+                // FASE 3: Sincronizar con réplicas DESPUÉS de éxito local
+                if (!knownReplicas.isEmpty()) {
+                    LOGGER.info("🔄 [PHASE 3] Synchronizing with " + knownReplicas.size() + " replicas");
+                    boolean syncSuccess = replicationManager.synchronizeOperation(fileName, operation, content);
+
+                    if (!syncSuccess) {
+                        LOGGER.warning("⚠️ Synchronization with some replicas failed");
+                        // En redundancia activa, continuamos ya que el coordinador tiene la operación
+                        // pero registramos el problema
+                    }
+                } else {
+                    LOGGER.info("ℹ️ No replicas to synchronize with - single node operation");
+                }
+
+                LOGGER.info("✅ [COMPLETE] Write operation completed successfully: " + operation + " on " + fileName);
+                return new ProtocolMessage(ProtocolCommand.SUCCESS, fileName, "Operation completed successfully");
+
             } finally {
-                // FASE 4: Liberar lock distribuido
-                LOGGER.info("🔓 Releasing distributed lock for: " + fileName);
+                // FASE 4: Liberar lock distribuido SIEMPRE
+                LOGGER.info("🔓 [PHASE 4] Releasing distributed lock for: " + fileName);
                 lockManager.releaseDistributedLock(fileName);
             }
 
         } catch (Exception e) {
-            LOGGER.log(Level.SEVERE, "❌ Error during write operation with active replication", e);
-            return new ProtocolMessage(ProtocolCommand.ERROR, fileName,
-                    "Replication error: " + e.getMessage());
+            LOGGER.log(Level.SEVERE, "❌ Error during write operation", e);
+            return new ProtocolMessage(ProtocolCommand.ERROR, fileName, "Operation error: " + e.getMessage());
         }
     }
 

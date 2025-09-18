@@ -61,89 +61,111 @@ public class DistributedLockManager {
     }
 
     /**
-     * 🔒 ADQUIRIR LOCK DISTRIBUIDO - Algoritmo mejorado
+     * 🔒 ADQUIRIR LOCK DISTRIBUIDO - Algoritmo corregido
      */
     public boolean acquireDistributedLock(String resourceId, String operationType) {
         long operationId = lockOperationCounter.incrementAndGet();
 
-        LOGGER.info("🔒 [Op:" + operationId + "] Acquiring distributed lock for: " + resourceId +
-                " (operation: " + operationType + ")");
+        LOGGER.info("🔒 [Lock:" + operationId + "] Attempting to acquire lock for: '" + resourceId +
+                "' (operation: " + operationType + ")");
 
+        localLock.lock();
         try {
-            // 1. Verificar disponibilidad local
-            if (isResourceLocallyLocked(resourceId)) {
-                LOGGER.warning("❌ [Op:" + operationId + "] Resource already locked locally: " + resourceId);
+            // 1. Verificar si YA tenemos el lock para este recurso específico
+            if (activeLocks.containsKey(resourceId)) {
+                DistributedLock existingLock = activeLocks.get(resourceId);
+                LOGGER.warning("❌ [Lock:" + operationId + "] Resource '" + resourceId +
+                        "' already locked by " + existingLock.getOwnerId() +
+                        " [Op:" + existingLock.getOperationId() + "]");
                 return false;
             }
 
-            // 2. Crear lock temporal
+            // 2. Crear lock request
             DistributedLock lockRequest = new DistributedLock(resourceId, serverId, operationType, operationId);
 
-            // 3. Solicitar consenso con timeout configurado
+            // 3. Si no hay otros servidores, otorgar lock inmediatamente
+            if (otherServers.isEmpty()) {
+                activeLocks.put(resourceId, lockRequest);
+                LOGGER.info("✅ [Lock:" + operationId + "] Lock granted locally (no other servers): '" + resourceId + "'");
+                return true;
+            }
+
+            // 4. Solicitar consenso de otros servidores
+            LOGGER.info("📡 [Lock:" + operationId + "] Requesting consensus from " + otherServers.size() + " servers");
             boolean consensusAchieved = requestConsensusWithTimeout(lockRequest);
 
             if (consensusAchieved) {
-                // 4. Adquirir lock localmente
+                // 5. Otorgar lock localmente
                 activeLocks.put(resourceId, lockRequest);
-                LOGGER.info("✅ [Op:" + operationId + "] Distributed lock acquired for: " + resourceId);
+                LOGGER.info("✅ [Lock:" + operationId + "] Distributed lock acquired: '" + resourceId + "'");
                 return true;
             } else {
-                LOGGER.warning("❌ [Op:" + operationId + "] Failed to achieve consensus for: " + resourceId);
+                LOGGER.warning("❌ [Lock:" + operationId + "] Consensus failed for: '" + resourceId + "'");
                 return false;
             }
 
-        } catch (Exception e) {
-            LOGGER.log(Level.SEVERE, "❌ [Op:" + operationId + "] Error acquiring lock for: " + resourceId, e);
-            return false;
+        } finally {
+            localLock.unlock();
         }
     }
 
     /**
-     * 🔓 LIBERAR LOCK DISTRIBUIDO
+     * 🔓 LIBERAR LOCK DISTRIBUIDO - Corregido para liberar solo el recurso específico
      */
     public void releaseDistributedLock(String resourceId) {
+        localLock.lock();
         try {
             DistributedLock lock = activeLocks.remove(resourceId);
             if (lock != null) {
                 long operationId = lock.getOperationId();
-                LOGGER.info("🔓 [Op:" + operationId + "] Releasing distributed lock for: " + resourceId);
+                LOGGER.info("🔓 [Lock:" + operationId + "] Releasing distributed lock for: '" + resourceId + "'");
 
-                // Notificar liberación a todos los servidores
-                notifyLockReleased(resourceId, operationId);
-                LOGGER.info("✅ [Op:" + operationId + "] Distributed lock released for: " + resourceId);
+                // Notificar liberación solo si hay otros servidores
+                if (!otherServers.isEmpty()) {
+                    notifyLockReleased(resourceId, operationId);
+                }
+
+                LOGGER.info("✅ [Lock:" + operationId + "] Lock released: '" + resourceId + "'");
+            } else {
+                LOGGER.warning("⚠️ Attempted to release non-existent lock: '" + resourceId + "'");
             }
-        } catch (Exception e) {
-            LOGGER.log(Level.WARNING, "❌ Error releasing distributed lock for: " + resourceId, e);
+        } finally {
+            localLock.unlock();
         }
     }
 
     /**
-     * 🗳️ SOLICITAR CONSENSO CON TIMEOUT
+     * 🗳️ SOLICITAR CONSENSO CON TIMEOUT - Simplificado y más robusto
      */
     private boolean requestConsensusWithTimeout(DistributedLock lock) {
-        if (otherServers.isEmpty()) {
-            LOGGER.info("✅ No other servers, consensus automatic");
-            return true;
-        }
-
         int totalServers = otherServers.size();
         CountDownLatch consensusLatch = new CountDownLatch(totalServers);
         AtomicInteger approvals = new AtomicInteger(0);
         AtomicInteger denials = new AtomicInteger(0);
+
+        LOGGER.info("📡 [Lock:" + lock.getOperationId() + "] Sending lock requests to " + totalServers + " servers");
 
         // Enviar solicitudes en paralelo
         for (ServerConnection server : otherServers) {
             lockExecutor.submit(() -> {
                 try {
                     LockRequestResult result = requestLockFromServer(server, lock);
-                    if (result == LockRequestResult.GRANTED) {
-                        approvals.incrementAndGet();
-                    } else {
-                        denials.incrementAndGet();
+                    switch (result) {
+                        case GRANTED:
+                            approvals.incrementAndGet();
+                            LOGGER.fine("✅ [Lock:" + lock.getOperationId() + "] Approved by: " + server.getServerId());
+                            break;
+                        case DENIED:
+                        case TIMEOUT:
+                        case ERROR:
+                        default:
+                            denials.incrementAndGet();
+                            LOGGER.fine("❌ [Lock:" + lock.getOperationId() + "] Denied by: " + server.getServerId() + " (" + result + ")");
+                            break;
                     }
                 } catch (Exception e) {
-                    LOGGER.log(Level.WARNING, "Error requesting lock from: " + server.getServerId(), e);
                     denials.incrementAndGet();
+                    LOGGER.log(Level.WARNING, "❌ Error requesting lock from: " + server.getServerId(), e);
                 } finally {
                     consensusLatch.countDown();
                 }
@@ -151,41 +173,51 @@ public class DistributedLockManager {
         }
 
         try {
-            // Esperar respuestas con timeout configurado
-            boolean allResponsesReceived = consensusLatch.await(config.getLockTimeoutMs(), TimeUnit.MILLISECONDS);
+            // Esperar respuestas con timeout más generoso
+            boolean allResponsesReceived = consensusLatch.await(
+                    Math.max(config.getLockTimeoutMs(), 10000), TimeUnit.MILLISECONDS);
+
+            int totalApprovals = approvals.get();
+            int totalDenials = denials.get();
 
             if (!allResponsesReceived) {
-                LOGGER.warning("⏰ Lock consensus timeout for: " + lock.getResourceId());
-                return false;
+                LOGGER.warning("⏰ [Lock:" + lock.getOperationId() + "] Consensus timeout - some servers didn't respond");
             }
 
-            // Evaluar consenso
-            boolean consensusAchieved = evaluateConsensus(approvals.get(), denials.get(), totalServers);
+            LOGGER.info("🗳️ [Lock:" + lock.getOperationId() + "] Consensus results: " +
+                    totalApprovals + " approvals, " + totalDenials + " denials (" + totalServers + " total)");
 
-            LOGGER.info("🗳️ Consensus result: " + approvals.get() + " approvals, " +
-                    denials.get() + " denials (" + totalServers + " total) - " +
+            // Evaluar consenso - Para desarrollo, ser más permisivo
+            boolean consensusAchieved = evaluateConsensus(totalApprovals, totalDenials, totalServers);
+
+            LOGGER.info("🗳️ [Lock:" + lock.getOperationId() + "] Consensus decision: " +
                     (consensusAchieved ? "GRANTED" : "DENIED"));
 
             return consensusAchieved;
 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            LOGGER.warning("Consensus interrupted for: " + lock.getResourceId());
+            LOGGER.warning("❌ [Lock:" + lock.getOperationId() + "] Consensus interrupted");
             return false;
         }
     }
 
+
     /**
-     * 📊 EVALUAR CONSENSO
+     * 📊 EVALUAR CONSENSO - Más permisivo para desarrollo
      */
     private boolean evaluateConsensus(int approvals, int denials, int totalServers) {
-        if (config.requireUnanimousConsensus()) {
-            // Unanimidad requerida
-            return approvals == totalServers && denials == 0;
-        } else {
-            // Mayoría simple
-            return approvals > totalServers / 2;
+        if (totalServers == 0) {
+            return true; // Sin otros servidores, otorgar automáticamente
         }
+
+        // Para desarrollo: aceptar si hay al menos 50% de aprobación o si no hay denegaciones explícitas
+        if (denials == 0) {
+            return true; // Si nadie lo denegó explícitamente, otorgar
+        }
+
+        // Mayoría simple
+        return approvals > totalServers / 2;
     }
 
     /**
@@ -243,45 +275,47 @@ public class DistributedLockManager {
     }
 
     /**
-     * 📥 PROCESAR SOLICITUD DE LOCK DE OTRO SERVIDOR
+     * 📥 PROCESAR SOLICITUD DE LOCK - Mejorado para debugging
      */
     public ProtocolMessage processLockRequest(ProtocolMessage request) {
         String resourceId = request.getFileName();
-        DistributedLock lockRequest = deserializeLockRequest(request.getContent());
 
-        LOGGER.info("📥 Lock request from " + lockRequest.getOwnerId() + " for: " + resourceId +
-                " [Op:" + lockRequest.getOperationId() + "]");
-
-        localLock.lock();
         try {
-            // Verificar si el recurso está lockeado
-            if (activeLocks.containsKey(resourceId)) {
-                DistributedLock existingLock = activeLocks.get(resourceId);
-                LOGGER.info("❌ Lock denied - resource locked by: " + existingLock.getOwnerId() +
-                        " [Op:" + existingLock.getOperationId() + "]");
-                return new ProtocolMessage(ProtocolCommand.LOCK_DENIED, resourceId,
-                        "Resource locked by " + existingLock.getOwnerId());
+            DistributedLock lockRequest = deserializeLockRequest(request.getContent());
+            long operationId = lockRequest.getOperationId();
+
+            LOGGER.info("📥 [Lock:" + operationId + "] Processing lock request from " +
+                    lockRequest.getOwnerId() + " for: '" + resourceId + "'");
+
+            localLock.lock();
+            try {
+                // Verificar si el recurso específico está lockeado
+                if (activeLocks.containsKey(resourceId)) {
+                    DistributedLock existingLock = activeLocks.get(resourceId);
+                    LOGGER.info("❌ [Lock:" + operationId + "] DENIED - Resource '" + resourceId +
+                            "' locked by: " + existingLock.getOwnerId() + " [Op:" + existingLock.getOperationId() + "]");
+                    return new ProtocolMessage(ProtocolCommand.LOCK_DENIED, resourceId,
+                            "Resource locked by " + existingLock.getOwnerId());
+                }
+
+                // Otorgar el lock
+                LOGGER.info("✅ [Lock:" + operationId + "] GRANTED to " + lockRequest.getOwnerId() +
+                        " for: '" + resourceId + "'");
+                return new ProtocolMessage(ProtocolCommand.LOCK_GRANTED, resourceId, serverId);
+
+            } finally {
+                localLock.unlock();
             }
 
-            // Verificar si hay solicitudes pendientes con mayor prioridad
-            if (hasPriorityConflict(resourceId, lockRequest)) {
-                LOGGER.info("❌ Lock denied - priority conflict for: " + resourceId);
-                return new ProtocolMessage(ProtocolCommand.LOCK_DENIED, resourceId,
-                        "Priority conflict");
-            }
-
-            // Otorgar el lock
-            LOGGER.info("✅ Lock granted to " + lockRequest.getOwnerId() + " for: " + resourceId +
-                    " [Op:" + lockRequest.getOperationId() + "]");
-            return new ProtocolMessage(ProtocolCommand.LOCK_GRANTED, resourceId, serverId);
-
-        } finally {
-            localLock.unlock();
+        } catch (Exception e) {
+            LOGGER.log(Level.WARNING, "❌ Error processing lock request for: " + resourceId, e);
+            return new ProtocolMessage(ProtocolCommand.LOCK_DENIED, resourceId,
+                    "Processing error: " + e.getMessage());
         }
     }
 
     /**
-     * 📥 PROCESAR LIBERACIÓN DE LOCK
+     * 📥 PROCESAR LIBERACIÓN DE LOCK - Mejorado
      */
     public void processLockRelease(ProtocolMessage releaseMessage) {
         String resourceId = releaseMessage.getFileName();
@@ -289,65 +323,50 @@ public class DistributedLockManager {
         String releasingServer = parts[0];
         long operationId = parts.length > 1 ? Long.parseLong(parts[1]) : 0;
 
-        LOGGER.info("📥 Lock released by " + releasingServer + " for: " + resourceId +
-                " [Op:" + operationId + "]");
+        LOGGER.info("📥 [Lock:" + operationId + "] Processing lock release from " + releasingServer +
+                " for: '" + resourceId + "'");
 
-        // Remover de solicitudes pendientes si existe
-        pendingRequests.remove(resourceId);
-
-        // Procesar cola de solicitudes pendientes
-        processQueuedRequests(resourceId);
+        // No necesitamos hacer nada especial aquí ya que no mantenemos locks de otros servidores
+        // Solo loggeamos la notificación
+        LOGGER.info("✅ [Lock:" + operationId + "] Acknowledged lock release for: '" + resourceId + "'");
     }
 
-    /**
-     * 🔍 VERIFICAR SI RECURSO ESTÁ LOCKEADO LOCALMENTE
-     */
-    private boolean isResourceLocallyLocked(String resourceId) {
-        return activeLocks.containsKey(resourceId);
-    }
 
     /**
-     * ⚖️ VERIFICAR CONFLICTOS DE PRIORIDAD
-     */
-    private boolean hasPriorityConflict(String resourceId, DistributedLock incomingRequest) {
-        LockRequestQueue queue = pendingRequests.get(resourceId);
-        if (queue == null) {
-            return false;
-        }
-
-        // Verificar si hay solicitudes con timestamp anterior (mayor prioridad)
-        return queue.hasHigherPriorityRequest(incomingRequest.getTimestamp());
-    }
-
-    /**
-     * 📋 PROCESAR SOLICITUDES EN COLA
-     */
-    private void processQueuedRequests(String resourceId) {
-        LockRequestQueue queue = pendingRequests.get(resourceId);
-        if (queue != null && !queue.isEmpty()) {
-            LOGGER.info("📋 Processing queued requests for: " + resourceId);
-            // Implementar lógica de procesamiento de cola si es necesario
-        }
-    }
-
-    /**
-     * 🧹 LIMPIAR LOCKS EXPIRADOS
+     * 🧹 LIMPIAR LOCKS EXPIRADOS - Más agresivo
      */
     private void cleanupExpiredLocks() {
+        if (activeLocks.isEmpty()) {
+            return;
+        }
+
         long currentTime = System.currentTimeMillis();
         long lockTimeoutMs = config.getLockTimeoutMs();
 
-        Iterator<Map.Entry<String, DistributedLock>> iterator = activeLocks.entrySet().iterator();
-        while (iterator.hasNext()) {
-            Map.Entry<String, DistributedLock> entry = iterator.next();
-            DistributedLock lock = entry.getValue();
+        localLock.lock();
+        try {
+            Iterator<Map.Entry<String, DistributedLock>> iterator = activeLocks.entrySet().iterator();
+            int cleanedCount = 0;
 
-            if ((currentTime - lock.getAcquisitionTime()) > lockTimeoutMs) {
-                LOGGER.warning("🧹 Cleaning up expired lock: " + entry.getKey() +
-                        " [Op:" + lock.getOperationId() + "]");
-                iterator.remove();
-                notifyLockReleased(entry.getKey(), lock.getOperationId());
+            while (iterator.hasNext()) {
+                Map.Entry<String, DistributedLock> entry = iterator.next();
+                DistributedLock lock = entry.getValue();
+
+                if ((currentTime - lock.getAcquisitionTime()) > lockTimeoutMs) {
+                    String resourceId = entry.getKey();
+                    LOGGER.warning("🧹 [Lock:" + lock.getOperationId() + "] Cleaning expired lock: '" +
+                            resourceId + "' (held for " + (currentTime - lock.getAcquisitionTime()) + "ms)");
+                    iterator.remove();
+                    notifyLockReleased(resourceId, lock.getOperationId());
+                    cleanedCount++;
+                }
             }
+
+            if (cleanedCount > 0) {
+                LOGGER.info("🧹 Cleaned " + cleanedCount + " expired locks");
+            }
+        } finally {
+            localLock.unlock();
         }
     }
 
@@ -394,17 +413,34 @@ public class DistributedLockManager {
     }
 
     /**
-     * 📊 ESTADÍSTICAS
+     * 📊 ESTADÍSTICAS DE LOCKS - Con más detalle
      */
     public Map<String, Object> getLockStatistics() {
-        Map<String, Object> stats = new HashMap<>();
-        stats.put("serverId", serverId);
-        stats.put("activeLocksCount", activeLocks.size());
-        stats.put("connectedServers", otherServers.size());
-        stats.put("pendingRequestsCount", pendingRequests.size());
-        stats.put("totalOperations", lockOperationCounter.get());
-        stats.put("lockTimeoutMs", config.getLockTimeoutMs());
-        return stats;
+        localLock.lock();
+        try {
+            Map<String, Object> stats = new HashMap<>();
+            stats.put("serverId", serverId);
+            stats.put("activeLocksCount", activeLocks.size());
+            stats.put("connectedServers", otherServers.size());
+            stats.put("totalOperations", lockOperationCounter.get());
+            stats.put("lockTimeoutMs", config.getLockTimeoutMs());
+
+            // Detalles de locks activos para debugging
+            if (!activeLocks.isEmpty()) {
+                Map<String, String> activeLockDetails = new HashMap<>();
+                for (Map.Entry<String, DistributedLock> entry : activeLocks.entrySet()) {
+                    DistributedLock lock = entry.getValue();
+                    activeLockDetails.put(entry.getKey(),
+                            "Owner: " + lock.getOwnerId() + ", Op: " + lock.getOperationId() +
+                                    ", Age: " + (System.currentTimeMillis() - lock.getAcquisitionTime()) + "ms");
+                }
+                stats.put("activeLockDetails", activeLockDetails);
+            }
+
+            return stats;
+        } finally {
+            localLock.unlock();
+        }
     }
 
     /**

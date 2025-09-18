@@ -478,7 +478,7 @@ public class MultiReplicaFileClient {
                 // 3. Ha habido un éxito en los últimos 60 segundos
                 if (lastFailureTime == 0) return true;
                 if (lastSuccessTime > lastFailureTime) return true;
-                return (System.currentTimeMillis() - lastSuccessTime) < 60000;
+                return (System.currentTimeMillis() - lastSuccessTime) < 120000;
             }
         }
 
@@ -489,7 +489,7 @@ public class MultiReplicaFileClient {
 
                 // Penalizar fallos recientes
                 long timeSinceLastFailure = System.currentTimeMillis() - lastFailureTime;
-                double timePenalty = lastFailureTime > 0 ? Math.min(1.0, timeSinceLastFailure / 60000.0) : 1.0;
+                double timePenalty = lastFailureTime > 0 ? Math.min(1.0, timeSinceLastFailure / 120000.0) : 1.0;
 
                 return successRate * timePenalty;
             }

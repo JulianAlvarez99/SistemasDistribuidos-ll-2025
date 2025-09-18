@@ -13,7 +13,7 @@ public class SystemConfig {
     private final Properties properties;
 
     // Configuraciones por defecto
-    public static final String DEFAULT_STORAGE_BASE_PATH = "C:/Users/julia/OneDrive/Desktop/RepoMaster/distributed_storage";
+    public static final String DEFAULT_STORAGE_BASE_PATH = "C:/Users/julia/Desktop/SistDistribuidos/backup_storage";
     public static final int DEFAULT_LOCK_TIMEOUT_MS = 30000;
     public static final int DEFAULT_SYNC_TIMEOUT_MS = 15000;
     public static final int DEFAULT_CONNECTION_TIMEOUT_MS = 10000;

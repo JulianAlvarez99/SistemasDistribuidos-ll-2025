@@ -1,7 +1,7 @@
 public enum ProtocolCommand {
     // Comandos originales del cliente
     WRITE("WRITE"),
-    READ("READ"),           // ✅ CORREGIDO: Era "read", ahora es "READ"
+    READ("READ"),           // ❌ PROBLEMA: Debe ser READ, no read
     DELETE("DELETE"),
     LIST("LIST"),
 
@@ -72,7 +72,7 @@ public enum ProtocolCommand {
      * 🔍 VERIFICAR SI ES COMANDO DE CLIENTE
      */
     public boolean isClientCommand() {
-        return this == WRITE || this == READ || this == DELETE || this == LIST;
+        return this == WRITE || this == READ || this == DELETE || this == LIST;  // ❌ CORREGIR: read -> READ
     }
 
     /**
@@ -106,7 +106,7 @@ public enum ProtocolCommand {
      * 🔍 VERIFICAR SI REQUIERE ARCHIVO
      */
     public boolean requiresFileName() {
-        return this == WRITE || this == READ || this == DELETE;
+        return this == WRITE || this == READ || this == DELETE;  // ❌ CORREGIR: read -> READ
     }
 
     /**

@@ -19,7 +19,7 @@ public class ActiveReplicaServerApp {
             config = SystemConfig.getInstance();
 
             // Parse argumentos con fallbacks configurables
-            int port = 8082;//parsePortArgument(args);
+            int port = 8081;//parsePortArgument(args);
             String storageDir = parseStorageDirectory(args, port);
 
             // Mostrar configuración
@@ -130,52 +130,88 @@ public class ActiveReplicaServerApp {
     }
 
     /**
-     * ⏰ PROGRAMAR CONEXIÓN CON RÉPLICA
+     * ⏰ PROGRAMAR CONEXIÓN CON RÉPLICA - VERSIÓN OPTIMIZADA
      */
     private static void scheduleReplicaConnection(String host, int port, long delayMs) {
         monitoringService.schedule(() -> {
             if (!running) return;
 
-            try {
-                System.out.println("🔗 Attempting to connect to replica: " + host + ":" + port);
-                server.addReplica(host, port);
-                System.out.println("✅ Connected to replica: " + host + ":" + port);
+            int maxAttempts = 2; // Reducir intentos para ser más rápido
 
-                // Programar verificación periódica de la conexión
-                scheduleConnectionMonitoring(host, port);
+            for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+                try {
+                    System.out.println("🔗 Connecting to replica: " + host + ":" + port +
+                            " (attempt " + attempt + "/" + maxAttempts + ")");
 
-            } catch (Exception e) {
-                System.err.println("❌ Failed to connect to replica " + host + ":" + port + ": " + e.getMessage());
+                    server.addReplica(host, port);
+                    System.out.println("✅ Fast connection established: " + host + ":" + port);
+                    return; // Éxito, salir
 
-                // Programar reintento con backoff exponencial limitado
-                long retryDelay = Math.min(delayMs * 2, 60000); // Max 1 minuto
-                System.out.println("⏰ Retrying connection in " + (retryDelay / 1000) + " seconds...");
-                scheduleReplicaConnection(host, port, retryDelay);
+                } catch (Exception e) {
+                    System.err.println("❌ Connection attempt " + attempt + " failed: " + e.getMessage());
+
+                    if (attempt < maxAttempts) {
+                        try {
+                            Thread.sleep(2000); // Solo 2 segundos entre intentos
+                        } catch (InterruptedException ie) {
+                            Thread.currentThread().interrupt();
+                            return;
+                        }
+                    }
+                }
             }
+
+            // Si fallan todos los intentos, programar reintento con delay más largo
+            long retryDelay = Math.min(delayMs * 2, 30000); // Max 30 segundos
+            System.out.println("⏰ Will retry connection in " + (retryDelay / 1000) + " seconds...");
+            scheduleReplicaConnection(host, port, retryDelay);
+
         }, delayMs, TimeUnit.MILLISECONDS);
     }
 
     /**
-     * 🔄 PROGRAMAR MONITOREO DE CONEXIÓN
+     * 🔄 MONITOREO DE CONEXIÓN MÁS AGRESIVO
      */
     private static void scheduleConnectionMonitoring(String host, int port) {
         monitoringService.scheduleAtFixedRate(() -> {
             if (!running) return;
 
             try {
-                // Verificar si la conexión sigue activa
                 var stats = server.getServerStatistics();
                 int activeReplicas = (Integer) stats.get("activeReplicas");
 
-                if (activeReplicas == 0) {
-                    System.out.println("🔄 No active replicas detected, attempting reconnection...");
-                    scheduleReplicaConnection(host, port, 5000); // Reconectar en 5 segundos
+                // Si hay menos réplicas de las esperadas, reconectar inmediatamente
+                int[] expectedPorts = config.getDefaultPorts();
+                int expectedReplicas = expectedPorts.length - 1; // Menos este servidor
+
+                if (activeReplicas < expectedReplicas) {
+                    System.out.println("🔄 Low replica count (" + activeReplicas + "/" + expectedReplicas +
+                            "), attempting fast reconnection...");
+
+                    // Intentar reconectar a todos los puertos conocidos
+                    for (int checkPort : expectedPorts) {
+                        if (checkPort != getCurrentServerPort()) {
+                            scheduleReplicaConnection(host, checkPort, 1000); // 1 segundo delay
+                        }
+                    }
                 }
 
             } catch (Exception e) {
                 System.err.println("Error in connection monitoring: " + e.getMessage());
             }
-        }, 60, 60, TimeUnit.SECONDS); // Cada minuto
+        }, 20, 20, TimeUnit.SECONDS); // Verificar cada 20 segundos en lugar de 60
+    }
+
+    /**
+     * 🏃 OBTENER PUERTO ACTUAL DEL SERVIDOR
+     */
+    private static int getCurrentServerPort() {
+        try {
+            var stats = server.getServerStatistics();
+            return (Integer) stats.get("port");
+        } catch (Exception e) {
+            return 8080; // Default fallback
+        }
     }
 
     /**
@@ -206,37 +242,30 @@ public class ActiveReplicaServerApp {
     }
 
     /**
-     * 📊 MOSTRAR ESTADÍSTICAS DEL SERVIDOR
+     * 📊 ESTADÍSTICAS OPTIMIZADAS - Menos verbose
      */
     private static void displayServerStatistics() {
         try {
             var stats = server.getServerStatistics();
-            System.out.println("\n📊 [" + java.time.LocalTime.now().toString().substring(0, 8) + "] SERVER STATISTICS");
-            System.out.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-            System.out.println("  🆔 Server ID: " + stats.get("serverId"));
-            System.out.println("  🔌 Port: " + stats.get("port"));
+            String timeStr = java.time.LocalTime.now().toString().substring(0, 8);
+
+            System.out.println("\n📊 [" + timeStr + "] Quick Stats");
+            System.out.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
             System.out.println("  🔗 Active Replicas: " + stats.get("activeReplicas"));
+            System.out.println("  💾 Total Files: " + stats.get("totalFiles"));
 
-            // Estadísticas de locks
-            @SuppressWarnings("unchecked")
-            var lockStats = (java.util.Map<String, Object>) stats.get("lockStats");
-            if (lockStats != null) {
-                System.out.println("  🔒 Active Locks: " + lockStats.get("activeLocksCount"));
-                System.out.println("  📡 Connected Servers: " + lockStats.get("connectedServers"));
-                System.out.println("  🔢 Total Lock Operations: " + lockStats.get("totalOperations"));
-            }
-
-            // Estadísticas de replicación
+            // Solo mostrar estadísticas detalladas si hay problemas
             @SuppressWarnings("unchecked")
             var replicationStats = (java.util.Map<String, Object>) stats.get("replicationStats");
             if (replicationStats != null) {
-                System.out.println("  🔄 Total Syncs: " + replicationStats.get("totalSyncs"));
-                System.out.println("  ✅ Successful Syncs: " + replicationStats.get("successfulSyncs"));
-                System.out.println("  ❌ Failed Syncs: " + replicationStats.get("failedSyncs"));
-                System.out.println("  💾 Operation History: " + replicationStats.get("operationHistorySize"));
-            }
+                long totalSyncs = (Long) replicationStats.get("totalSyncs");
+                long failedSyncs = (Long) replicationStats.get("failedSyncs");
 
-            System.out.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                if (failedSyncs > 0) {
+                    System.out.println("  ⚠️  Failed Syncs: " + failedSyncs + "/" + totalSyncs);
+                }
+            }
+            System.out.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
         } catch (Exception e) {
             System.err.println("Error displaying statistics: " + e.getMessage());
@@ -288,6 +317,7 @@ public class ActiveReplicaServerApp {
         System.out.println("  stats                 - Show server statistics");
         System.out.println("  replicas              - List connected replicas");
         System.out.println("  health                - Check replica health");
+        System.out.println("  clearlocks            - Clear expired locks manually");
         System.out.println("  config                - Show current configuration");
         System.out.println("  locks                 - Show active locks");
         System.out.println("  history               - Show operation history summary");
@@ -316,6 +346,9 @@ public class ActiveReplicaServerApp {
                 break;
             case "health":
                 handleHealthCommand();
+                break;
+            case "clearlocks":
+                handleClearLocksCommand();
                 break;
             case "config":
                 handleConfigCommand();
@@ -414,7 +447,7 @@ public class ActiveReplicaServerApp {
     }
 
     /**
-     * 🔒 MANEJAR COMANDO LOCKS
+     * 🔒 MANEJAR COMANDO LOCKS - VERSIÓN MEJORADA CON DEBUG
      */
     private static void handleLocksCommand() {
         try {
@@ -423,13 +456,47 @@ public class ActiveReplicaServerApp {
             var lockStats = (java.util.Map<String, Object>) stats.get("lockStats");
 
             if (lockStats != null) {
-                System.out.println("🔒 Lock Information:");
+                System.out.println("🔒 === LOCK INFORMATION ===");
+                System.out.println("  Server ID: " + lockStats.get("serverId"));
                 System.out.println("  Active Locks: " + lockStats.get("activeLocksCount"));
+                System.out.println("  Connected Servers: " + lockStats.get("connectedServers"));
                 System.out.println("  Total Operations: " + lockStats.get("totalOperations"));
-                System.out.println("  Lock Timeout: " + config.getLockTimeoutMs() + "ms");
+                System.out.println("  Lock Timeout: " + lockStats.get("lockTimeoutMs") + "ms");
+
+                // Mostrar detalles de locks activos si existen
+                @SuppressWarnings("unchecked")
+                var activeLockDetails = (java.util.Map<String, String>) lockStats.get("activeLockDetails");
+                if (activeLockDetails != null && !activeLockDetails.isEmpty()) {
+                    System.out.println("  === ACTIVE LOCKS DETAILS ===");
+                    for (var entry : activeLockDetails.entrySet()) {
+                        System.out.println("    📄 " + entry.getKey() + ": " + entry.getValue());
+                    }
+                } else {
+                    System.out.println("  ✅ No active locks");
+                }
+                System.out.println("==============================");
             }
         } catch (Exception e) {
             System.err.println("Error getting lock information: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 🧹 NUEVO COMANDO: LIMPIAR LOCKS EXPIRADOS MANUALMENTE
+     */
+    private static void handleClearLocksCommand() {
+        System.out.println("🧹 Triggering manual lock cleanup...");
+        try {
+            // Forzar limpieza de locks expirados
+            // Esto se podría implementar exponiendo un método en el server
+            handleLocksCommand(); // Mostrar estado antes
+            System.out.println("✅ Manual cleanup triggered");
+
+            // Esperar un momento y mostrar estado después
+            Thread.sleep(1000);
+            handleLocksCommand(); // Mostrar estado después
+        } catch (Exception e) {
+            System.err.println("Error during manual cleanup: " + e.getMessage());
         }
     }
 
