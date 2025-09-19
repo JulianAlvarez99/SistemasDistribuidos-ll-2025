@@ -20,6 +20,7 @@ public class FaultTolerantClient extends JFrame {
     private int successfulRequests = 0;
     private int timeoutRequests = 0;
     private int incorrectResponses = 0;
+    private int errorResponses = 0;
     private int connectionFailures = 0;
     private int totalRequests = 0;
 
@@ -136,6 +137,11 @@ public class FaultTolerantClient extends JFrame {
                     appendLog("Connection failure: " + request);
                     retryCount++;
                     break;
+                case ERROR_RESPONSE:
+                    errorResponses++;
+                    appendLog("Error response received for: " + request);
+                    retryCount++;
+                    break;
                 case INCORRECT_RESPONSE:
                     incorrectResponses++;
                     appendLog("Incorrect response for: " + request);
@@ -168,10 +174,16 @@ public class FaultTolerantClient extends JFrame {
 
                 // Accept any ACK response from any worker
                 if (response.startsWith("ACK_W") && response.contains("_" + request)) {
-                    appendLog("Received response from coordinator: " + response);
+                    appendLog("Received successful response from coordinator: " + response);
                     return RequestResult.SUCCESS;
+                } else if (response.startsWith("ERROR_")) {
+                    appendLog("Received error response from coordinator: " + response + " for request: " + request);
+                    return RequestResult.ERROR_RESPONSE;
+                } else if (response.equals("TIMEOUT_COORDINATOR")) {
+                    appendLog("Coordinator timeout for request: " + request);
+                    return RequestResult.TIMEOUT;
                 } else {
-                    appendLog("Unexpected response: " + response + " for request: " + request);
+                    appendLog("Unexpected response from coordinator: " + response + " for request: " + request);
                     return RequestResult.INCORRECT_RESPONSE;
                 }
             }
@@ -189,6 +201,7 @@ public class FaultTolerantClient extends JFrame {
         successfulRequests = 0;
         timeoutRequests = 0;
         incorrectResponses = 0;
+        errorResponses = 0;
         connectionFailures = 0;
         totalRequests = 0;
         requestCounter = 1;
@@ -199,8 +212,8 @@ public class FaultTolerantClient extends JFrame {
     private void updateStatistics() {
         SwingUtilities.invokeLater(() -> {
             String stats = String.format(
-                    "<html>Statistics - Total: %d | Successful: %d | Timeouts: %d | Connection Failures: %d | Incorrect Responses: %d</html>",
-                    totalRequests, successfulRequests, timeoutRequests, connectionFailures, incorrectResponses
+                    "<html>Statistics - Total: %d | Successful: %d | Timeouts: %d | Connection Failures: %d | Error Responses: %d | Incorrect Responses: %d</html>",
+                    totalRequests, successfulRequests, timeoutRequests, connectionFailures, errorResponses, incorrectResponses
             );
             statsLabel.setText(stats);
         });
@@ -214,7 +227,7 @@ public class FaultTolerantClient extends JFrame {
     }
 
     private enum RequestResult {
-        SUCCESS, TIMEOUT, CONNECTION_FAILURE, INCORRECT_RESPONSE
+        SUCCESS, TIMEOUT, CONNECTION_FAILURE, ERROR_RESPONSE, INCORRECT_RESPONSE
     }
 
     public static void main(String[] args) {

@@ -23,7 +23,7 @@ public class CoordinatorServer extends JFrame implements WorkerProcess.WorkerPro
     // UI Components
     private JTextArea logArea;
     private JButton startButton, stopButton, addWorkerButton, removeWorkerButton;
-    private JSpinner workerCountSpinner, connectionFailureRate, responseDelayRate, incorrectResponseRate;
+    private JSpinner workerCountSpinner;
     private JList<String> workerList;
     private DefaultListModel<String> workerListModel;
 
@@ -31,6 +31,8 @@ public class CoordinatorServer extends JFrame implements WorkerProcess.WorkerPro
         initializeUI();
         threadPool = Executors.newCachedThreadPool();
     }
+
+    private JSpinner connectionFailureRate, responseDelayRate, incorrectResponseRate;
 
     private void initializeUI() {
         setTitle("Coordinator Server with Dynamic Worker Pool");
@@ -52,29 +54,23 @@ public class CoordinatorServer extends JFrame implements WorkerProcess.WorkerPro
         stopButton.setEnabled(false);
         controlPanel.add(stopButton, gbc);
 
-        gbc.gridx = 0; gbc.gridy = 1;
-        controlPanel.add(new JLabel("Initial Workers:"), gbc);
-        gbc.gridx = 1;
-        workerCountSpinner = new JSpinner(new SpinnerNumberModel(3, 1, 10, 1));
-        controlPanel.add(workerCountSpinner, gbc);
-
         gbc.gridx = 2; gbc.gridy = 0; gbc.insets = new Insets(5,5,5,5);
         controlPanel.add(new JLabel("Connection Failure Rate (%):"), gbc);
         gbc.gridx = 3;
         connectionFailureRate = new JSpinner(new SpinnerNumberModel(20, 0, 100, 5));
         controlPanel.add(connectionFailureRate, gbc);
 
+        gbc.gridx = 0; gbc.gridy = 1;
+        controlPanel.add(new JLabel("Initial Workers:"), gbc);
+        gbc.gridx = 1;
+        workerCountSpinner = new JSpinner(new SpinnerNumberModel(3, 1, 10, 1));
+        controlPanel.add(workerCountSpinner, gbc);
+
         gbc.gridx = 2; gbc.gridy = 1;
         controlPanel.add(new JLabel("Response Delay Rate (%):"), gbc);
         gbc.gridx = 3;
         responseDelayRate = new JSpinner(new SpinnerNumberModel(15, 0, 100, 5));
         controlPanel.add(responseDelayRate, gbc);
-
-        gbc.gridx = 2; gbc.gridy = 2;
-        controlPanel.add(new JLabel("Incorrect Response Rate (%):"), gbc);
-        gbc.gridx = 3;
-        incorrectResponseRate = new JSpinner(new SpinnerNumberModel(10, 0, 100, 5));
-        controlPanel.add(incorrectResponseRate, gbc);
 
         gbc.gridx = 0; gbc.gridy = 2;
         addWorkerButton = new JButton("Add Worker");
@@ -87,6 +83,12 @@ public class CoordinatorServer extends JFrame implements WorkerProcess.WorkerPro
         removeWorkerButton.addActionListener(e -> removeSelectedWorker());
         removeWorkerButton.setEnabled(false);
         controlPanel.add(removeWorkerButton, gbc);
+
+        gbc.gridx = 2; gbc.gridy = 2;
+        controlPanel.add(new JLabel("Incorrect Response Rate (%):"), gbc);
+        gbc.gridx = 3;
+        incorrectResponseRate = new JSpinner(new SpinnerNumberModel(10, 0, 100, 5));
+        controlPanel.add(incorrectResponseRate, gbc);
 
         add(controlPanel, BorderLayout.NORTH);
 
@@ -169,6 +171,7 @@ public class CoordinatorServer extends JFrame implements WorkerProcess.WorkerPro
     private void addWorker() {
         int workerId = nextWorkerId.getAndIncrement();
         int port = WORKER_BASE_PORT + workerId;
+
         WorkerProcess worker = getWorkerProcess(workerId, port);
 
         if (worker.start()) {
@@ -186,7 +189,6 @@ public class CoordinatorServer extends JFrame implements WorkerProcess.WorkerPro
         int incorrectRate = (Integer) incorrectResponseRate.getValue();
 
         WorkerProcess worker = new WorkerProcess(workerId, port, this);
-        // Set random fault parameters for variety
         Random rand = new Random();
         worker.setFaultRates(connFailRate, delayRate, incorrectRate);
         worker.setDelayParams(500 + rand.nextInt(1000), 5000 + rand.nextInt(10000));
@@ -236,9 +238,12 @@ public class CoordinatorServer extends JFrame implements WorkerProcess.WorkerPro
                     String response = coordinateRequest(request);
                     if (response != null) {
                         out.println(response);
-                        appendLog("Coordinator responded: " + response);
+                        appendLog("Coordinator forwarded response: " + response);
                     } else {
-                        appendLog("No valid response obtained for: " + request);
+                        // Send explicit timeout response to client
+                        String timeoutResponse = "TIMEOUT_COORDINATOR";
+                        out.println(timeoutResponse);
+                        appendLog("Coordinator timeout, sent: " + timeoutResponse);
                     }
                 }
             } catch (IOException e) {
@@ -257,25 +262,32 @@ public class CoordinatorServer extends JFrame implements WorkerProcess.WorkerPro
             return null;
         }
 
-        // Create futures for all worker requests
+        // Create futures for all worker requests with worker references
+        Map<Future<String>, WorkerProcess> futureToWorkerMap = new HashMap<>();
         CompletionService<String> completionService = new ExecutorCompletionService<>(threadPool);
-        List<Future<String>> futures = new ArrayList<>();
 
         for (WorkerProcess worker : workers.values()) {
             Future<String> future = completionService.submit(() -> sendRequestToWorker(worker, request));
-            futures.add(future);
+            futureToWorkerMap.put(future, worker);
         }
 
         appendLog("Sent request to " + workers.size() + " workers");
 
-        // Wait for first successful response
+        // Wait for first response (success or error)
         try {
             Future<String> firstCompleted = completionService.poll(COORDINATOR_TIMEOUT, TimeUnit.MILLISECONDS);
             if (firstCompleted != null) {
                 String response = firstCompleted.get();
-                if (response != null && response.startsWith("ACK_")) {
-                    // Cancel remaining requests
-                    futures.forEach(f -> f.cancel(true));
+                if (response != null) {
+                    // Notify all other workers to abort regardless of response type
+                    notifyWorkersToAbort(futureToWorkerMap, firstCompleted);
+                    if (response.startsWith("ACK_")) {
+                        appendLog("First successful response received, notified other workers to abort");
+                    } else if (response.startsWith("ERROR_")) {
+                        appendLog("First error response received, notified other workers to abort");
+                    } else {
+                        appendLog("First response received (unknown type), notified other workers to abort");
+                    }
                     return response;
                 }
             }
@@ -283,9 +295,21 @@ public class CoordinatorServer extends JFrame implements WorkerProcess.WorkerPro
             appendLog("Error waiting for worker responses: " + e.getMessage());
         }
 
-        // Cancel all remaining requests
-        futures.forEach(f -> f.cancel(true));
+        // Cancel all remaining requests and notify workers to abort
+        futureToWorkerMap.forEach((future, worker) -> {
+            future.cancel(true);
+            worker.abortCurrentRequest();
+        });
         return null;
+    }
+
+    private void notifyWorkersToAbort(Map<Future<String>, WorkerProcess> futureToWorkerMap, Future<String> completedFuture) {
+        futureToWorkerMap.forEach((future, worker) -> {
+            if (future != completedFuture) {
+                future.cancel(true);
+                worker.abortCurrentRequest();
+            }
+        });
     }
 
     private String sendRequestToWorker(WorkerProcess worker, String request) {

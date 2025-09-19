@@ -8,6 +8,7 @@ public class WorkerProcess {
     private final int port;
     private ServerSocket serverSocket;
     private final AtomicBoolean running = new AtomicBoolean(false);
+    private final AtomicBoolean shouldAbort = new AtomicBoolean(false);
     private final Random random = new Random();
     private WorkerProcessListener listener;
 
@@ -60,6 +61,11 @@ public class WorkerProcess {
         }
     }
 
+    public void abortCurrentRequest() {
+        shouldAbort.set(true);
+        logMessage("Received abort signal");
+    }
+
     private void run() {
         while (running.get()) {
             try {
@@ -74,15 +80,18 @@ public class WorkerProcess {
     }
 
     private void processRequest(Socket clientSocket) {
+        shouldAbort.set(false);
         try (BufferedReader in = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
              PrintWriter out = new PrintWriter(clientSocket.getOutputStream(), true)) {
 
             String request = in.readLine();
-            if (request != null) {
+            if (request != null && !shouldAbort.get()) {
                 handleRequest(request, out, clientSocket);
             }
         } catch (IOException e) {
-            logMessage("Error processing request: " + e.getMessage());
+            if (!shouldAbort.get()) {
+                logMessage("Error processing request: " + e.getMessage());
+            }
         } finally {
             try {
                 clientSocket.close();
@@ -95,9 +104,21 @@ public class WorkerProcess {
 
         // Random base delay for this worker
         try {
-            Thread.sleep(baseDelayMs + random.nextInt(maxDelayMs - baseDelayMs));
+            int delayMs = baseDelayMs + random.nextInt(maxDelayMs - baseDelayMs);
+            for (int i = 0; i < delayMs / 100; i++) {
+                if (shouldAbort.get()) {
+                    logMessage("Aborted processing for: " + request);
+                    return;
+                }
+                Thread.sleep(100);
+            }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            return;
+        }
+
+        if (shouldAbort.get()) {
+            logMessage("Aborted processing for: " + request);
             return;
         }
 
@@ -115,11 +136,22 @@ public class WorkerProcess {
             int delayMs = 1000 + random.nextInt(3000);
             logMessage("Adding extra delay of " + delayMs + "ms for: " + request);
             try {
-                Thread.sleep(delayMs);
+                for (int i = 0; i < delayMs / 100; i++) {
+                    if (shouldAbort.get()) {
+                        logMessage("Aborted during delay for: " + request);
+                        return;
+                    }
+                    Thread.sleep(100);
+                }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 return;
             }
+        }
+
+        if (shouldAbort.get()) {
+            logMessage("Aborted before response for: " + request);
+            return;
         }
 
         // Incorrect response simulation
