@@ -1,5 +1,3 @@
-// ============ PROCESO DEL GRUPO PLANO ============
-
 import javax.swing.*;
 import java.awt.*;
 import java.io.*;
@@ -14,6 +12,8 @@ public class FlatGroupProcess extends JFrame {
     private final int clientPort;
     private final int internalPort;
     private final Set<ProcessInfo> groupMembers = ConcurrentHashMap.newKeySet();
+    private final List<ProcessInfo> bootstrapList = new ArrayList<>();
+
     private ServerSocket clientSocket;
     private ServerSocket internalSocket;
     private ExecutorService threadPool;
@@ -39,20 +39,20 @@ public class FlatGroupProcess extends JFrame {
     private JLabel statusLabel;
     private JSpinner connFailureSpinner, delayRateSpinner, incorrectRateSpinner;
 
-    public FlatGroupProcess(int processId, int clientPort, int internalPort) {
+    public FlatGroupProcess(int processId, int clientPort, int internalPort, List<ProcessInfo> bootstrapList) {
         this.processId = processId;
         this.clientPort = clientPort;
         this.internalPort = internalPort;
+        this.bootstrapList.addAll(bootstrapList);
         this.threadPool = Executors.newCachedThreadPool();
         initializeUI();
     }
 
     private void initializeUI() {
         setTitle("Flat Group Process " + processId);
-        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
         setLayout(new BorderLayout());
 
-        // Control Panel
         JPanel controlPanel = new JPanel(new GridBagLayout());
         GridBagConstraints gbc = new GridBagConstraints();
 
@@ -94,7 +94,6 @@ public class FlatGroupProcess extends JFrame {
 
         add(controlPanel, BorderLayout.NORTH);
 
-        // Members Panel
         JPanel membersPanel = new JPanel(new BorderLayout());
         membersPanel.setBorder(BorderFactory.createTitledBorder("Group Members"));
         membersListModel = new DefaultListModel<>();
@@ -103,7 +102,6 @@ public class FlatGroupProcess extends JFrame {
         membersPanel.setPreferredSize(new Dimension(200, 300));
         add(membersPanel, BorderLayout.EAST);
 
-        // Log Area
         logArea = new JTextArea(20, 50);
         logArea.setEditable(false);
         add(new JScrollPane(logArea), BorderLayout.CENTER);
@@ -123,38 +121,80 @@ public class FlatGroupProcess extends JFrame {
             internalSocket = new ServerSocket(internalPort);
             running.set(true);
 
-            // Add self to group
+            // Add self to group first
             groupMembers.add(new ProcessInfo(processId, "localhost", internalPort));
-            updateMembersList();
 
-            // Start client request listener
+            // Perform initial discovery with bootstrap list
+            appendLog("Starting discovery with " + bootstrapList.size() + " bootstrap members");
+            performInitialDiscovery();
+
+            // Start listeners
             threadPool.submit(this::listenForClients);
-
-            // Start internal communication listener
             threadPool.submit(this::listenForInternalMessages);
-
-            // Start periodic membership announcement
             threadPool.submit(this::announceMembership);
 
             startButton.setEnabled(false);
             stopButton.setEnabled(true);
             statusLabel.setText("Status: Running (Client: " + clientPort + ", Internal: " + internalPort + ")");
 
-            appendLog("Process started - ID: " + processId);
+            appendLog("Process started - ID: " + processId + ", Group size: " + groupMembers.size());
         } catch (IOException e) {
             appendLog("Failed to start process: " + e.getMessage());
         }
     }
 
+    private void performInitialDiscovery() {
+        CountDownLatch discoveryLatch = new CountDownLatch(bootstrapList.size());
+
+        for (ProcessInfo peer : bootstrapList) {
+            if (peer.processId == processId) {
+                discoveryLatch.countDown();
+                continue;
+            }
+
+            threadPool.submit(() -> {
+                try {
+                    // Try to connect and announce ourselves
+                    for (int attempt = 0; attempt < 3 && running.get(); attempt++) {
+                        try (Socket socket = new Socket()) {
+                            socket.connect(new InetSocketAddress(peer.host, peer.internalPort), 1000);
+                            PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
+                            out.println("JOIN:" + processId + ":" + internalPort);
+
+                            groupMembers.add(peer);
+                            appendLog("Connected to P" + peer.processId);
+                            break;
+                        } catch (IOException e) {
+                            if (attempt < 2) {
+                                Thread.sleep(200);
+                            }
+                        }
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                } finally {
+                    discoveryLatch.countDown();
+                }
+            });
+        }
+
+        try {
+            discoveryLatch.await(5, TimeUnit.SECONDS);
+            updateMembersList();
+            appendLog("Discovery complete. Known members: " + groupMembers.size());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
     private void stopProcess() {
         running.set(false);
-
-        // Send departure message to group
         broadcastMessage("LEAVE:" + processId);
 
         try {
             if (clientSocket != null) clientSocket.close();
             if (internalSocket != null) internalSocket.close();
+            threadPool.shutdownNow();
         } catch (IOException e) {
             appendLog("Error stopping process: " + e.getMessage());
         }
@@ -190,16 +230,13 @@ public class FlatGroupProcess extends JFrame {
             if (request != null) {
                 appendLog("Received client request: " + request);
 
-                // Determine leader for this request using consistent hashing
                 int leaderId = selectLeaderForRequest(request);
 
                 if (leaderId == processId) {
-                    // I am the leader for this request
                     appendLog("I am leader for: " + request);
                     String response = coordinateConsensus(request);
                     out.println(response);
                 } else {
-                    // Forward to leader
                     appendLog("Forwarding to leader P" + leaderId + " for: " + request);
                     String response = forwardToLeader(leaderId, request);
                     out.println(response);
@@ -217,7 +254,6 @@ public class FlatGroupProcess extends JFrame {
     private int selectLeaderForRequest(String request) {
         if (groupMembers.isEmpty()) return processId;
 
-        // Use hash of request to select leader consistently across all processes
         int hash = Math.abs(request.hashCode());
         List<ProcessInfo> sortedMembers = new ArrayList<>(groupMembers);
         sortedMembers.sort(Comparator.comparingInt(p -> p.processId));
@@ -238,14 +274,11 @@ public class FlatGroupProcess extends JFrame {
         ConsensusData consensus = new ConsensusData(request, requiredConsensus);
         activeConsensus.put(request, consensus);
 
-        // Request votes from all members (including self)
         broadcastMessage("VOTE_REQUEST:" + processId + ":" + request);
 
-        // Process own vote
         String myVote = processRequest(request);
         consensus.addVote(processId, myVote);
 
-        // Wait for consensus
         try {
             String result = consensus.waitForConsensus(5000);
             if (result != null) {
@@ -312,7 +345,6 @@ public class FlatGroupProcess extends JFrame {
 
                 appendLog("Received vote request from P" + senderId + " for: " + request);
 
-                // Process and send vote back to leader
                 String vote = processRequest(request);
                 sendVoteToLeader(senderId, request, vote);
 
@@ -321,7 +353,6 @@ public class FlatGroupProcess extends JFrame {
                 int voterId = Integer.parseInt(parts[1]);
                 String voteData = parts[2];
 
-                // Extract request and vote
                 String[] voteParts = voteData.split("\\|", 2);
                 String request = voteParts[0];
                 String vote = voteParts[1];
@@ -386,7 +417,6 @@ public class FlatGroupProcess extends JFrame {
     }
 
     private String processRequest(String request) {
-        // Simulate processing with delays and faults
         try {
             int delay = baseDelayMs + random.nextInt(maxDelayMs - baseDelayMs);
             Thread.sleep(delay);
@@ -395,20 +425,17 @@ public class FlatGroupProcess extends JFrame {
             return null;
         }
 
-        // Connection failure simulation (return null = no vote)
         if (random.nextInt(100) < connectionFailureRate) {
             appendLog("Simulating connection failure for: " + request);
             return null;
         }
 
-        // Incorrect response simulation
         if (random.nextInt(100) < incorrectResponseRate) {
             String errorResponse = "ERROR_P" + processId + "_" + random.nextInt(1000);
             appendLog("Generating error response: " + errorResponse);
             return errorResponse;
         }
 
-        // Normal response
         String response = "ACK_P" + processId + "_" + request;
         appendLog("Generated response: " + response);
         return response;
@@ -460,11 +487,10 @@ public class FlatGroupProcess extends JFrame {
         });
     }
 
-    // Inner classes
-    private static class ProcessInfo {
-        int processId;
-        String host;
-        int internalPort;
+    static class ProcessInfo {
+        final int processId;
+        final String host;
+        final int internalPort;
 
         ProcessInfo(int id, String host, int port) {
             this.processId = id;
@@ -533,23 +559,4 @@ public class FlatGroupProcess extends JFrame {
             return votesReceived;
         }
     }
-
-    public static void main(String[] args) {
-        if (args.length < 3) {
-            System.err.println("Usage: java FlatGroupProcess <processId> <clientPort> <internalPort>");
-            System.exit(1);
-        }
-
-        int processId = Integer.parseInt(args[0]);
-        int clientPort = Integer.parseInt(args[1]);
-        int internalPort = Integer.parseInt(args[2]);
-
-        SwingUtilities.invokeLater(() -> {
-            FlatGroupProcess process = new FlatGroupProcess(processId, clientPort, internalPort);
-            process.setVisible(true);
-        });
-    }
 }
-
-
-

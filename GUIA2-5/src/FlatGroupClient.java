@@ -1,10 +1,10 @@
-// ============ CLIENTE ============
-
 import javax.swing.*;
 import java.awt.*;
 import java.io.*;
 import java.net.*;
 import java.util.concurrent.*;
+import java.util.*;
+import java.util.List;
 
 public class FlatGroupClient extends JFrame {
     private static final String SERVER_HOST = "localhost";
@@ -14,6 +14,12 @@ public class FlatGroupClient extends JFrame {
     private ScheduledExecutorService scheduler;
     private int requestCounter = 1;
     private volatile boolean running = false;
+    private final Random random = new Random();
+
+    // Server ports configuration
+    private int baseServerPort = 8080;
+    private int serverCount = 4;
+    private final List<Integer> availablePorts = new ArrayList<>();
 
     // Statistics
     private int successfulRequests = 0;
@@ -27,7 +33,7 @@ public class FlatGroupClient extends JFrame {
     // UI Components
     private JTextArea logArea;
     private JButton startButton, stopButton, resetStatsButton;
-    private JSpinner intervalSpinner, portSpinner;
+    private JSpinner intervalSpinner, basePortSpinner, portCountSpinner;
     private JLabel statsLabel;
 
     public FlatGroupClient() {
@@ -43,20 +49,28 @@ public class FlatGroupClient extends JFrame {
         // Control Panel
         JPanel controlPanel = new JPanel(new GridBagLayout());
         GridBagConstraints gbc = new GridBagConstraints();
+        gbc.insets = new Insets(5, 5, 5, 5);
+        gbc.anchor = GridBagConstraints.WEST;
 
-        gbc.gridx = 0; gbc.gridy = 0; gbc.insets = new Insets(5,5,5,5);
-        controlPanel.add(new JLabel("Server Port:"), gbc);
+        gbc.gridx = 0; gbc.gridy = 0;
+        controlPanel.add(new JLabel("Base Server Port:"), gbc);
         gbc.gridx = 1;
-        portSpinner = new JSpinner(new SpinnerNumberModel(8080, 8080, 8090, 1));
-        controlPanel.add(portSpinner, gbc);
+        basePortSpinner = new JSpinner(new SpinnerNumberModel(8080, 8000, 9000, 1));
+        controlPanel.add(basePortSpinner, gbc);
 
         gbc.gridx = 0; gbc.gridy = 1;
+        controlPanel.add(new JLabel("Number of Servers:"), gbc);
+        gbc.gridx = 1;
+        portCountSpinner = new JSpinner(new SpinnerNumberModel(4, 1, 10, 1));
+        controlPanel.add(portCountSpinner, gbc);
+
+        gbc.gridx = 0; gbc.gridy = 2;
         controlPanel.add(new JLabel("Request Interval (seconds):"), gbc);
         gbc.gridx = 1;
         intervalSpinner = new JSpinner(new SpinnerNumberModel(5, 1, 60, 1));
         controlPanel.add(intervalSpinner, gbc);
 
-        gbc.gridx = 0; gbc.gridy = 2;
+        gbc.gridx = 0; gbc.gridy = 3;
         startButton = new JButton("Start Client");
         startButton.addActionListener(e -> startClient());
         controlPanel.add(startButton, gbc);
@@ -91,11 +105,20 @@ public class FlatGroupClient extends JFrame {
     private void startClient() {
         running = true;
         startButton.setEnabled(false);
-        stopButton.setEnabled(false);
+        stopButton.setEnabled(true);
+
+        baseServerPort = (Integer) basePortSpinner.getValue();
+        serverCount = (Integer) portCountSpinner.getValue();
+
+        // Build list of available server ports
+        availablePorts.clear();
+        for (int i = 0; i < serverCount; i++) {
+            availablePorts.add(baseServerPort + i);
+        }
 
         int intervalSeconds = (Integer) intervalSpinner.getValue();
-        int serverPort = (Integer) portSpinner.getValue();
-        appendLog("Client started with " + intervalSeconds + " second intervals (connecting to port " + serverPort + ")");
+        appendLog("Client started with " + intervalSeconds + " second intervals");
+        appendLog("Connecting to servers on ports: " + availablePorts);
 
         scheduler.scheduleAtFixedRate(this::sendRequest, 0, intervalSeconds, TimeUnit.SECONDS);
     }
@@ -126,7 +149,7 @@ public class FlatGroupClient extends JFrame {
                 appendLog("Retry attempt " + retryCount + " for: " + request);
             }
 
-            RequestResult result = sendSingleRequest(request);
+            RequestResult result = sendSingleRequestWithFailover(request);
 
             switch (result) {
                 case SUCCESS:
@@ -169,11 +192,30 @@ public class FlatGroupClient extends JFrame {
         updateStatistics();
     }
 
-    private RequestResult sendSingleRequest(String request) {
-        int serverPort = (Integer) portSpinner.getValue();
+    private RequestResult sendSingleRequestWithFailover(String request) {
+        // Try random servers for failover
+        List<Integer> shuffledPorts = new ArrayList<>(availablePorts);
+        Collections.shuffle(shuffledPorts, random);
 
+        for (int port : shuffledPorts) {
+            RequestResult result = sendToServer(request, port);
+
+            if (result != RequestResult.CONNECTION_FAILURE) {
+                // Got a response (even if error), return it
+                return result;
+            }
+
+            // Connection failed, try next server
+            appendLog("Failed to connect to port " + port + ", trying next server...");
+        }
+
+        // All servers failed
+        return RequestResult.CONNECTION_FAILURE;
+    }
+
+    private RequestResult sendToServer(String request, int port) {
         try (Socket socket = new Socket()) {
-            socket.connect(new InetSocketAddress(SERVER_HOST, serverPort), REQUEST_TIMEOUT);
+            socket.connect(new InetSocketAddress(SERVER_HOST, port), REQUEST_TIMEOUT);
             socket.setSoTimeout(REQUEST_TIMEOUT);
 
             try (PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
@@ -187,16 +229,16 @@ public class FlatGroupClient extends JFrame {
                 }
 
                 if (response.startsWith("ACK_P") && response.contains("_" + request)) {
-                    appendLog("Received successful consensus: " + response);
+                    appendLog("Received successful consensus from port " + port + ": " + response);
                     return RequestResult.SUCCESS;
                 } else if (response.startsWith("ERROR_")) {
-                    appendLog("Received error consensus: " + response);
+                    appendLog("Received error consensus from port " + port + ": " + response);
                     return RequestResult.ERROR_RESPONSE;
                 } else if (response.startsWith("NO_CONSENSUS_")) {
-                    appendLog("No consensus by group: " + response);
+                    appendLog("No consensus by group (port " + port + "): " + response);
                     return RequestResult.NO_CONSENSUS;
                 } else {
-                    appendLog("Unexpected response: " + response);
+                    appendLog("Unexpected response from port " + port + ": " + response);
                     return RequestResult.INCORRECT_RESPONSE;
                 }
             }
@@ -205,7 +247,7 @@ public class FlatGroupClient extends JFrame {
         } catch (ConnectException e) {
             return RequestResult.CONNECTION_FAILURE;
         } catch (IOException e) {
-            appendLog("IO Error: " + e.getMessage());
+            appendLog("IO Error on port " + port + ": " + e.getMessage());
             return RequestResult.CONNECTION_FAILURE;
         }
     }
