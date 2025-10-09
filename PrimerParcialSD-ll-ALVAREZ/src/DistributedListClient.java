@@ -161,18 +161,16 @@ public class DistributedListClient {
         String item = itemTextField.getText().trim();
         if (item.isEmpty()) return;
 
-        int delayMs = 100; // Default min delay
+        int delayMs = 1000; // Default min delay
 
-/** Lo que provocaba este bloque de codigo es que se implementara un delay en la consistencia estricta
- * y un doble delay en la consistencia continua. Ahora respeta puramente ambas consistencias **/
-//        try {
-//            int maxDelay = Integer.parseInt(delayField.getText().trim());
-//            if (maxDelay > 1) {
-//                delayMs = 1000 + random.nextInt(maxDelay * 1000 - 1000);
-//            }
-//        } catch (NumberFormatException e) {
-//            log("Invalid delay. Using 1 second.");
-//        }
+        try {
+            int maxDelay = Integer.parseInt(delayField.getText().trim());
+            if (maxDelay > 1) {
+                delayMs = 1000 + random.nextInt(maxDelay * 1000 - 1000);
+            }
+        } catch (NumberFormatException e) {
+            log("Invalid delay. Using 1 second.");
+        }
 
         final int finalDelay = delayMs;
         new Thread(() -> {
