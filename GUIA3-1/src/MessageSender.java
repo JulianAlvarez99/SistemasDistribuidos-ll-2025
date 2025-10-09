@@ -2,8 +2,10 @@ import javax.swing.*;
 import java.awt.*;
 import java.io.*;
 import java.net.*;
+import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.Base64;
 import java.util.Random;
 import java.util.concurrent.*;
 import java.util.List;
@@ -270,7 +272,7 @@ public class MessageSender extends JFrame {
         String message = generateMessage();
         String algorithm = (String) hashAlgorithmCombo.getSelectedItem();
 
-        appendLog("\n--- Preparing Message ---");
+        appendLog("\n=== PREPARING MESSAGE ===");
         appendLog("Original message (" + message.length() + " bytes):");
         appendLog(message);
 
@@ -285,17 +287,28 @@ public class MessageSender extends JFrame {
 
         // Decide if we should adulterate the message
         int adulterationRate = (Integer) adulterationRateSpinner.getValue();
-        boolean shouldAdulterate = random.nextInt(100) < adulterationRate;
+        int randomValue = random.nextInt(100);
+        boolean shouldAdulterate = randomValue < adulterationRate;
+
+        appendLog("DEBUG: Adulteration check - Random: " + randomValue + " < Rate: " + adulterationRate + " = " + shouldAdulterate);
 
         String transmittedMessage = message;
         if (shouldAdulterate) {
             transmittedMessage = adulterateMessage(message);
             appendLog("⚠ ADULTERATION APPLIED!");
-            appendLog("Adulterated message:");
+            appendLog("Adulterated message (" + transmittedMessage.length() + " bytes):");
             appendLog(transmittedMessage);
+
+            // Verify the messages are actually different
+            if (message.equals(transmittedMessage)) {
+                appendLog("⚠ WARNING: Adulteration failed - messages are identical!");
+            } else {
+                appendLog("✓ Confirmed: Message was modified");
+            }
+
             messagesAdulterated++;
         } else {
-            appendLog("✓ Message transmitted without adulteration");
+            appendLog("✓ Message transmitted WITHOUT adulteration");
         }
 
         // Broadcast to all connected clients
@@ -366,7 +379,8 @@ public class MessageSender extends JFrame {
     private String calculateHash(String message, String algorithm) {
         try {
             MessageDigest digest = MessageDigest.getInstance(algorithm);
-            byte[] hashBytes = digest.digest(message.getBytes());
+            // CAMBIO: Especificar explícitamente la codificación a UTF-8 para consistencia
+            byte[] hashBytes = digest.digest(message.getBytes(StandardCharsets.UTF_8));
             return bytesToHex(hashBytes);
         } catch (NoSuchAlgorithmException e) {
             appendLog("ERROR: Algorithm not available - " + algorithm);
@@ -383,13 +397,17 @@ public class MessageSender extends JFrame {
     }
 
     private void broadcastMessage(String message, String hash, String algorithm) {
-        // Create protocol message: ALGORITHM|HASH|MESSAGE_LENGTH|MESSAGE
-        String protocolMessage = algorithm + "|" + hash + "|" + message.length() + "|" + message;
+        // AÑADIDO: Codificar el mensaje en Base64 para una transmisión segura
+        String encodedMessage = Base64.getEncoder().encodeToString(message.getBytes(StandardCharsets.UTF_8));
+
+        // CAMBIO: Usar el mensaje codificado en el protocolo
+        // La longitud que enviamos sigue siendo la del mensaje original para verificación en el receptor
+        String protocolMessage = algorithm + "|" + hash + "|" + message.length() + "|" + encodedMessage;
 
         appendLog("\n>>> BROADCASTING TO RECEIVERS <<<");
-        appendLog("Protocol: " + algorithm + " | Hash Length: " + hash.length() + " | Message Length: " + message.length());
+        appendLog("Protocol: " + algorithm + " | Hash: " + hash.length() + " | Original Length: " + message.length());
+        appendLog("DEBUG: Base64 Payload Length: " + encodedMessage.length());
 
-        // Remove disconnected clients
         connectedClients.removeIf(client -> !client.isConnected());
 
         if (connectedClients.isEmpty()) {
@@ -397,7 +415,6 @@ public class MessageSender extends JFrame {
             return;
         }
 
-        // Send to all connected clients
         int successCount = 0;
         for (ClientHandler client : connectedClients) {
             try {
@@ -407,9 +424,9 @@ public class MessageSender extends JFrame {
                 appendLog("Error sending to client: " + e.getMessage());
             }
         }
-
         appendLog("✓ Transmission complete - Sent to " + successCount + " client(s)");
     }
+
 
     private void updateStatistics() {
         SwingUtilities.invokeLater(() -> {

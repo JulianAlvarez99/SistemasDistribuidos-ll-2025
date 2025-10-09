@@ -3,8 +3,10 @@ import javax.swing.table.DefaultTableModel;
 import java.awt.*;
 import java.io.*;
 import java.net.*;
+import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.Base64;
 import java.util.concurrent.*;
 
 public class MessageReceiver extends JFrame {
@@ -205,53 +207,49 @@ public class MessageReceiver extends JFrame {
         appendLog("Raw protocol data length: " + protocolMessage.length() + " bytes");
 
         try {
-            // Parse protocol: ALGORITHM|HASH|MESSAGE_LENGTH|MESSAGE
+            // Parse protocol: ALGORITHM|HASH|MESSAGE_LENGTH|BASE64_ENCODED_MESSAGE
             String[] parts = protocolMessage.split("\\|", 4);
             if (parts.length < 4) {
-                appendLog("ERROR: Invalid protocol format");
+                appendLog("ERROR: Invalid protocol format - expected 4 parts, got " + parts.length);
                 return;
             }
 
-            String algorithm = parts[0];
-            String receivedHash = parts[1];
-            int messageLength = Integer.parseInt(parts[2]);
-            String message = parts[3];
+            String algorithm = parts[0].trim();
+            String receivedHash = parts[1].trim();
+            int expectedLength = Integer.parseInt(parts[2].trim());
+            String encodedMessage = parts[3]; // El payload ahora está en Base64
+
+            // AÑADIDO: Decodificar el mensaje desde Base64
+            byte[] decodedBytes = Base64.getDecoder().decode(encodedMessage);
+            String message = new String(decodedBytes, StandardCharsets.UTF_8);
 
             appendLog("Algorithm: " + algorithm);
             appendLog("Received hash: " + receivedHash);
-            appendLog("Message length: " + messageLength + " bytes");
-            appendLog("Message content:");
-            appendLog(message);
+            appendLog("Expected message length: " + expectedLength + " bytes");
+            appendLog("Actual message length: " + message.length() + " bytes");
 
-            // Verify message length
-            if (message.length() != messageLength) {
-                appendLog("⚠ WARNING: Message length mismatch! Expected: " + messageLength + ", Got: " + message.length());
+            // El resto de la lógica de verificación funciona igual, pero ahora sobre el mensaje decodificado
+            if (message.length() != expectedLength) {
+                appendLog("⚠ WARNING: Message length mismatch! Expected: " + expectedLength + ", Got: " + message.length());
             }
 
-            // Calculate hash of received message
             String calculatedHash = calculateHash(message, algorithm);
             if (calculatedHash == null) {
                 appendLog("ERROR: Failed to calculate hash");
                 return;
             }
 
-            appendLog("Calculated hash: " + calculatedHash);
-
-            // Compare hashes
             boolean intact = receivedHash.equalsIgnoreCase(calculatedHash);
             messagesReceived++;
 
             if (intact) {
                 messagesIntact++;
-                appendLog("✓ INTEGRITY VERIFIED - Message is intact");
-                addResultToTable(algorithm, "✓ INTACT", receivedHash, calculatedHash, messageLength, true);
+                appendLog("✓ INTEGRITY VERIFIED - Hashes MATCH - Message is intact");
+                addResultToTable(algorithm, "✓ INTACT", receivedHash, calculatedHash, message.length(), true);
             } else {
                 messagesAdulterated++;
-                appendLog("✗ INTEGRITY VIOLATION - Message was adulterated!");
-                appendLog("Hash mismatch detected:");
-                appendLog("  Expected: " + receivedHash);
-                appendLog("  Got:      " + calculatedHash);
-                addResultToTable(algorithm, "✗ ADULTERATED", receivedHash, calculatedHash, messageLength, false);
+                appendLog("✗ INTEGRITY VIOLATION - Hashes DO NOT MATCH - Message was adulterated!");
+                addResultToTable(algorithm, "✗ ADULTERATED", receivedHash, calculatedHash, message.length(), false);
             }
 
             updateStatistics();
@@ -265,7 +263,8 @@ public class MessageReceiver extends JFrame {
     private String calculateHash(String message, String algorithm) {
         try {
             MessageDigest digest = MessageDigest.getInstance(algorithm);
-            byte[] hashBytes = digest.digest(message.getBytes());
+            // CAMBIO: Especificar explícitamente la codificación a UTF-8 para consistencia
+            byte[] hashBytes = digest.digest(message.getBytes(StandardCharsets.UTF_8));
             return bytesToHex(hashBytes);
         } catch (NoSuchAlgorithmException e) {
             appendLog("ERROR: Algorithm not available - " + algorithm);
