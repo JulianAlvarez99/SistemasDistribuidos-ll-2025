@@ -62,7 +62,6 @@ public class CoordinatorServer {
             return null; // Client is up to date
         }
 
-        // For a new client, lastKnownSequence is 0, send the full list as a single message.
         if (lastKnownSequence == 0) {
             return "INITIAL_LIST|" + currentSequence + "|" + String.join(",", itemList);
         }
@@ -82,15 +81,12 @@ public class CoordinatorServer {
         clientHandlers.remove(clientHandler);
         System.out.println("Client disconnected: " + clientHandler.getClientInfo() + ". Remaining clients: " + clientHandlers.size());
 
-        // **MODIFICATION START**
         // If the last client has disconnected, reset the server state.
         if (clientHandlers.isEmpty()) {
             resetServerState();
         }
-        // **MODIFICATION END**
     }
 
-    // **NEW METHOD**
     private synchronized void resetServerState() {
         System.out.println("Last client disconnected. Resetting server state.");
         itemList.clear();

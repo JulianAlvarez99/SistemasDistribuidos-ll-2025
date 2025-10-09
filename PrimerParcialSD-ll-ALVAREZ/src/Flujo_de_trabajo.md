@@ -1,9 +1,9 @@
 Esta aplicacion implementa arquitectura Cliente-Servidor (Primario-Backup) donde un componente central (CoordinatorServer) recibe, ordena y distribuye las actualizaciones. Pero no mantiene la persistencia de los datos.
 
 ### Flujo de ejecucion 
-- Iniciar CoordinatorServer 
+- Iniciar CoordinatorServer. CoordinatorServer inicia un server socket en localhost:9090
 
-- Iniciar tantas instacias quiera de DistributedListClient
+- Iniciar tantas instacias quiera de DistributedListClient. Cada instancia se conecta con un socket al puerto 9090 del servidor
 
 - Ingresar Nickname y conectarse
 
@@ -43,4 +43,4 @@ Modo Avión tolerante a fallos:
 
 - El servidor busca en su historial de mensajes (un Map<Integer, String>) todos los mensajes con un número de secuencia mayor al recibido y se los reenvía al cliente, que los procesa en orden para ponerse al día.
 
-Esta arquitectura no almacena en disco. El estado se pierde al cerrar las aplicaciones. Si el coordinador se mantuviese conectado pero sin nodos, realiza una limpieza de los registros y queda en blanco. Si se llegase a conectar un nuevo nodo, y fuese el primero en conectarse incia una nueva lista.
+Esta arquitectura no almacena en disco. El estado se pierde al cerrar las aplicaciones. Si el coordinador se mantuviese conectado pero sin nodos, realiza una limpieza de los registros y queda en blanco. Si se llegase a conectar un nuevo nodo, y fuese el primero en conectarse inicia una nueva lista.
