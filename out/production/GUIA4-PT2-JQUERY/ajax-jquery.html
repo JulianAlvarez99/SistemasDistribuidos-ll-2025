@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>jQuery Demo - AJAX</title>
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f4f4f4;
+            padding: 30px;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            max-width: 800px;
+            margin: 20px auto;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h2 {
+            color: #333;
+            border-bottom: 2px solid #4CAF50;
+            padding-bottom: 10px;
+        }
+        button {
+            padding: 10px 20px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 10px 5px;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        #content {
+            border: 1px solid #ddd;
+            padding: 15px;
+            border-radius: 4px;
+            background: #f9f9f9;
+            min-height: 100px;
+            margin-top: 15px;
+        }
+        select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin-top: 10px;
+        }
+        .nav {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .nav a {
+            display: inline-block;
+            margin: 0 10px;
+            padding: 10px 20px;
+            background: #2196F3;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+        }
+        .nav a:hover {
+            background: #0b7dda;
+        }
+        .badge {
+            background: #FF5722;
+            color: white;
+            padding: 3px 8px;
+            border-radius: 3px;
+            font-size: 12px;
+            margin-left: 10px;
+        }
+        .success {
+            color: #4CAF50;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="nav">
+        <a href="/">Inicio</a>
+        <a href="/login.html">Login</a>
+        <a href="/ajax-jquery.html">AJAX jQuery <span class="badge">NUEVO</span></a>
+    </div>
+
+    <div class="container">
+        <h1 style="text-align:center; color:#4CAF50;">AJAX con jQuery</h1>
+        <p style="text-align:center;">Implementación usando la librería jQuery para simplificar las peticiones AJAX</p>
+    </div>
+
+    <div class="container">
+        <h2>a) Cargar archivo de texto con jQuery.ajax()</h2>
+        <button id="btnLoadDoc">Cargar documento.txt</button>
+        <div id="content">Presione el botón para cargar el contenido...</div>
+    </div>
+
+    <div class="container">
+        <h2>b) Cargar países desde HTML con $.get()</h2>
+        <button id="btnLoadHTML">Cargar países HTML</button>
+        <select id="countriesHTML" size="5">
+            <option>Presione el botón para cargar...</option>
+        </select>
+    </div>
+
+    <div class="container">
+        <h2>c) Cargar países desde JSON con $.getJSON()</h2>
+        <button id="btnLoadJSON">Cargar países JSON</button>
+        <select id="countriesJSON" size="5">
+            <option>Presione el botón para cargar...</option>
+        </select>
+    </div>
+
+    <script>
+        $(document).ready(function() {
+
+            // a) jQuery.ajax() - Cargar documento.txt
+            $('#btnLoadDoc').click(function() {
+                $.ajax({
+                    url: '/documento.txt',
+                    method: 'GET',
+                    dataType: 'text',
+                    success: function(data) {
+                        $('#content').html(data.replace(/\n/g, '<br>'));
+                        console.log('Documento cargado exitosamente');
+                    },
+                    error: function(xhr, status, error) {
+                        $('#content').html('<span style="color:red;">Error al cargar: ' + error + '</span>');
+                        console.error('Error:', error);
+                    }
+                });
+            });
+
+            // b) $.get() - Cargar países desde HTML
+            $('#btnLoadHTML').click(function() {
+                $.get('/paises.txt', function(data) {
+                    $('#countriesHTML').html(data);
+                    console.log('Países HTML cargados');
+                }).fail(function(error) {
+                    console.error('Error cargando países HTML:', error);
+                });
+            });
+
+            // c) $.getJSON() - Cargar países desde JSON
+            $('#btnLoadJSON').click(function() {
+                $.getJSON('/paises.json', function(countries) {
+                    var $select = $('#countriesJSON');
+                    $select.empty();
+                    $select.append('<option value="">Seleccione un país</option>');
+
+                    $.each(countries, function(index, country) {
+                        $select.append(
+                            $('<option></option>')
+                                .val(country.code)
+                                .text(country.name)
+                        );
+                    });
+
+                    console.log('Países JSON cargados:', countries.length, 'países');
+                }).fail(function(error) {
+                    console.error('Error cargando países JSON:', error);
+                });
+            });
+
+        });
+    </script>
+</body>
+</html>
+

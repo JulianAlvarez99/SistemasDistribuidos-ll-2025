@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Agenda de Contactos - XML</title>
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 30px;
+            margin: 0;
+        }
+        .container {
+            background: white;
+            padding: 40px;
+            border-radius: 12px;
+            max-width: 1200px;
+            margin: 0 auto;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+        }
+        h1 {
+            color: #667eea;
+            text-align: center;
+            margin-bottom: 10px;
+            font-size: 36px;
+        }
+        .subtitle {
+            text-align: center;
+            color: #666;
+            margin-bottom: 30px;
+            font-style: italic;
+        }
+        .controls {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        button {
+            padding: 12px 30px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 0 10px;
+            transition: all 0.3s;
+        }
+        button:hover {
+            background: #5568d3;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+        .search-box {
+            max-width: 400px;
+            margin: 0 auto 30px;
+            position: relative;
+        }
+        .search-box input {
+            width: 100%;
+            padding: 12px 40px 12px 15px;
+            border: 2px solid #ddd;
+            border-radius: 25px;
+            font-size: 14px;
+            box-sizing: border-box;
+            transition: border-color 0.3s;
+        }
+        .search-box input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        .search-box::after {
+            content: "🔍";
+            position: absolute;
+            right: 15px;
+            top: 50%;
+            transform: translateY(-50%);
+        }
+        .stats {
+            text-align: center;
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+        }
+        .stats span {
+            margin: 0 15px;
+            font-weight: bold;
+            color: #667eea;
+        }
+        #contactos {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+        }
+        .contacto {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 25px;
+            border-radius: 10px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            transition: all 0.3s;
+            color: white;
+            position: relative;
+            overflow: hidden;
+        }
+        .contacto::before {
+            content: "";
+            position: absolute;
+            top: -50%;
+            right: -50%;
+            width: 200%;
+            height: 200%;
+            background: rgba(255,255,255,0.1);
+            transform: rotate(45deg);
+            transition: all 0.6s;
+        }
+        .contacto:hover::before {
+            top: -100%;
+            right: -100%;
+        }
+        .contacto:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.4);
+        }
+        .contacto-content {
+            position: relative;
+            z-index: 1;
+        }
+        .contacto h3 {
+            margin: 0 0 15px 0;
+            font-size: 20px;
+            color: white;
+            border-bottom: 2px solid rgba(255,255,255,0.3);
+            padding-bottom: 10px;
+        }
+        .contacto-info {
+            margin: 10px 0;
+            display: flex;
+            align-items: flex-start;
+        }
+        .contacto-info::before {
+            margin-right: 10px;
+            font-size: 18px;
+        }
+        .direccion::before { content: "📍"; }
+        .telefono::before { content: "📞"; }
+        .email::before { content: "📧"; }
+        .contacto-info span {
+            font-weight: bold;
+            margin-right: 5px;
+            opacity: 0.9;
+        }
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #667eea;
+            font-size: 18px;
+        }
+        .loading::after {
+            content: "...";
+            animation: dots 1.5s infinite;
+        }
+        @keyframes dots {
+            0%, 20% { content: "."; }
+            40% { content: ".."; }
+            60%, 100% { content: "..."; }
+        }
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+            border: 1px solid #f5c6cb;
+        }
+        .nav {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .nav a {
+            display: inline-block;
+            margin: 0 10px;
+            padding: 10px 20px;
+            background: #2196F3;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+        }
+        .nav a:hover {
+            background: #0b7dda;
+        }
+        .badge {
+            background: #FF5722;
+            color: white;
+            padding: 3px 8px;
+            border-radius: 3px;
+            font-size: 12px;
+        }
+        .no-results {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+            font-size: 18px;
+        }
+    </style>
+</head>
+<body>
+    <div class="nav">
+        <a href="/">Inicio</a>
+        <a href="/ajax-jquery.html">AJAX Demo</a>
+        <a href="/agenda.html">Agenda XML <span class="badge">XML</span></a>
+    </div>
+
+    <div class="container">
+        <h1>📇 Agenda de Contactos</h1>
+        <p class="subtitle">Documento XML con DTD - Visualización con jQuery</p>
+
+        <div class="controls">
+            <button id="btnCargar">Cargar Contactos desde XML</button>
+            <button id="btnLimpiar">Limpiar</button>
+        </div>
+
+        <div class="search-box" style="display:none;" id="searchBox">
+            <input type="text" id="searchInput" placeholder="Buscar por nombre, dirección, teléfono o email...">
+        </div>
+
+        <div id="stats" style="display:none;" class="stats">
+            <span>Total de contactos: <span id="totalContactos">0</span></span>
+            <span>Mostrando: <span id="contactosMostrados">0</span></span>
+        </div>
+
+        <div id="contactos">
+            <div class="loading" style="display:none;" id="loading">Cargando contactos</div>
+        </div>
+    </div>
+
+    <script>
+        $(document).ready(function() {
+            var contactosData = [];
+
+            // Cargar XML con jQuery
+            $('#btnCargar').click(function() {
+                $('#loading').show();
+                $('#contactos').html($('#loading'));
+
+                $.ajax({
+                    url: '/agenda.xml',
+                    type: 'GET',
+                    dataType: 'xml',
+                    success: function(xml) {
+                        contactosData = [];
+                        $('#contactos').empty();
+
+                        // Parsear XML y extraer contactos
+                        $(xml).find('contacto').each(function() {
+                            var contacto = {
+                                nombre: $(this).find('nombre').text(),
+                                direccion: $(this).find('direccion').text(),
+                                telefono: $(this).find('telefono').text(),
+                                email: $(this).find('email').text()
+                            };
+                            contactosData.push(contacto);
+                        });
+
+                        mostrarContactos(contactosData);
+                        $('#searchBox').fadeIn();
+                        $('#stats').fadeIn();
+                        actualizarEstadisticas(contactosData.length, contactosData.length);
+
+                        console.log('XML cargado exitosamente:', contactosData.length, 'contactos');
+                    },
+                    error: function(xhr, status, error) {
+                        $('#contactos').html(
+                            '<div class="error">Error al cargar agenda.xml: ' + error + '</div>'
+                        );
+                        console.error('Error:', status, error);
+                    }
+                });
+            });
+
+            // Limpiar
+            $('#btnLimpiar').click(function() {
+                $('#contactos').empty();
+                $('#searchBox').fadeOut();
+                $('#stats').fadeOut();
+                $('#searchInput').val('');
+                contactosData = [];
+            });
+
+            // Búsqueda en tiempo real
+            $('#searchInput').on('keyup', function() {
+                var searchTerm = $(this).val().toLowerCase();
+
+                if (searchTerm === '') {
+                    mostrarContactos(contactosData);
+                    actualizarEstadisticas(contactosData.length, contactosData.length);
+                } else {
+                    var filtrados = contactosData.filter(function(contacto) {
+                        return contacto.nombre.toLowerCase().includes(searchTerm) ||
+                               contacto.direccion.toLowerCase().includes(searchTerm) ||
+                               contacto.telefono.toLowerCase().includes(searchTerm) ||
+                               contacto.email.toLowerCase().includes(searchTerm);
+                    });
+
+                    if (filtrados.length > 0) {
+                        mostrarContactos(filtrados);
+                        actualizarEstadisticas(contactosData.length, filtrados.length);
+                    } else {
+                        $('#contactos').html(
+                            '<div class="no-results">No se encontraron contactos con "' +
+                            $('<div>').text(searchTerm).html() + '"</div>'
+                        );
+                        actualizarEstadisticas(contactosData.length, 0);
+                    }
+                }
+            });
+
+            // Función para mostrar contactos
+            function mostrarContactos(contactos) {
+                $('#contactos').empty();
+
+                $.each(contactos, function(index, contacto) {
+                    var html = '<div class="contacto">' +
+                        '<div class="contacto-content">' +
+                        '<h3>' + escapeHtml(contacto.nombre) + '</h3>' +
+                        '<div class="contacto-info direccion">' +
+                        escapeHtml(contacto.direccion) +
+                        '</div>' +
+                        '<div class="contacto-info telefono">' +
+                        escapeHtml(contacto.telefono) +
+                        '</div>' +
+                        '<div class="contacto-info email">' +
+                        '<a href="mailto:' + escapeHtml(contacto.email) + '" style="color:white;text-decoration:none;">' +
+                        escapeHtml(contacto.email) +
+                        '</a>' +
+                        '</div>' +
+                        '</div>' +
+                        '</div>';
+
+                    $('#contactos').append(html);
+                });
+
+                // Animación de entrada
+                $('.contacto').hide().each(function(index) {
+                    $(this).delay(index * 100).fadeIn(400);
+                });
+            }
+
+            // Actualizar estadísticas
+            function actualizarEstadisticas(total, mostrados) {
+                $('#totalContactos').text(total);
+                $('#contactosMostrados').text(mostrados);
+            }
+
+            // Escape HTML para seguridad
+            function escapeHtml(text) {
+                if (!text) return '';
+                return $('<div>').text(text).html();
+            }
+        });
+    </script>
+</body>
+</html>
+

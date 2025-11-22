@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<agenda>
+  <contacto id="1763849398939">
+      <nombre>Oriana Sapienza Muller</nombre>
+      <direccion>Millan 2247</direccion>
+      <telefono>2236960507</telefono>
+      <email>ori.sapienza.muller@gmail.com</email>
+  </contacto>
+
+  <contacto id="1763849772668">
+    <nombre>JULIAN MANUEL ALVAREZ</nombre>
+    <direccion>Figueroa Alcorta 2645</direccion>
+    <telefono>2235445573</telefono>
+    <email>julianftw1999@gmail.com</email>
+  </contacto>
+</agenda>

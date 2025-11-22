@@ -1,0 +1,668 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Gestión de Contactos - CRUD XML</title>
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        header {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+            text-align: center;
+        }
+
+        h1 {
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            color: #666;
+            font-style: italic;
+        }
+
+        .main-content {
+            display: grid;
+            grid-template-columns: 400px 1fr;
+            gap: 30px;
+        }
+
+        .form-panel {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+            height: fit-content;
+        }
+
+        .form-panel h2 {
+            color: #667eea;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #667eea;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #333;
+            font-weight: 600;
+        }
+
+        input[type="text"],
+        input[type="email"],
+        input[type="tel"] {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .btn {
+            padding: 12px 30px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.3s;
+            margin-right: 10px;
+        }
+
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #5568d3;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #5a6268;
+        }
+
+        .btn-success {
+            background: #28a745;
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: #218838;
+        }
+
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+            padding: 8px 15px;
+            font-size: 12px;
+        }
+
+        .btn-danger:hover {
+            background: #c82333;
+        }
+
+        .btn-edit {
+            background: #ffc107;
+            color: #333;
+            padding: 8px 15px;
+            font-size: 12px;
+        }
+
+        .btn-edit:hover {
+            background: #e0a800;
+        }
+
+        .list-panel {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+        }
+
+        .list-panel h2 {
+            color: #667eea;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #667eea;
+        }
+
+        .search-box {
+            margin-bottom: 20px;
+        }
+
+        .search-box input {
+            width: 100%;
+            padding: 12px 40px 12px 15px;
+            border: 2px solid #ddd;
+            border-radius: 25px;
+            font-size: 14px;
+        }
+
+        .stats {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .stats span {
+            margin: 0 15px;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .contactos-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 20px;
+        }
+
+        .contacto-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+            border-radius: 10px;
+            color: white;
+            position: relative;
+            transition: all 0.3s;
+        }
+
+        .contacto-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.4);
+        }
+
+        .contacto-card h3 {
+            margin-bottom: 15px;
+            font-size: 18px;
+            border-bottom: 2px solid rgba(255,255,255,0.3);
+            padding-bottom: 10px;
+        }
+
+        .contacto-info {
+            margin: 8px 0;
+            display: flex;
+            align-items: flex-start;
+            font-size: 14px;
+        }
+
+        .contacto-info::before {
+            margin-right: 8px;
+            font-size: 16px;
+        }
+
+        .direccion::before { content: "📍"; }
+        .telefono::before { content: "📞"; }
+        .email::before { content: "📧"; }
+
+        .contacto-actions {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid rgba(255,255,255,0.3);
+            display: flex;
+            gap: 10px;
+        }
+
+        .alert {
+            padding: 15px 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: none;
+            animation: slideDown 0.3s ease-out;
+        }
+
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .alert-success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .alert-error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #667eea;
+        }
+
+        .loading::after {
+            content: "...";
+            animation: dots 1.5s infinite;
+        }
+
+        @keyframes dots {
+            0%, 20% { content: "."; }
+            40% { content: ".."; }
+            60%, 100% { content: "..."; }
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #999;
+        }
+
+        .empty-state-icon {
+            font-size: 64px;
+            margin-bottom: 20px;
+        }
+
+        #editMode {
+            display: none;
+            background: #fff3cd;
+            padding: 10px;
+            border-radius: 6px;
+            margin-bottom: 15px;
+            color: #856404;
+            text-align: center;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📇 Gestión de Contactos</h1>
+            <p class="subtitle">Sistema CRUD con almacenamiento XML en servidor</p>
+        </header>
+
+        <div class="alert alert-success" id="alertSuccess"></div>
+        <div class="alert alert-error" id="alertError"></div>
+
+        <div class="main-content">
+            <!-- Panel de Formulario -->
+            <div class="form-panel">
+                <h2>📝 Formulario de Contacto</h2>
+
+                <div id="editMode">
+                    ✏️ Modo Edición - Modificando contacto
+                </div>
+
+                <form id="contactoForm">
+                    <input type="hidden" id="contactoId" value="">
+
+                    <div class="form-group">
+                        <label for="nombre">Nombre Completo *</label>
+                        <input type="text" id="nombre" required placeholder="Ej: Juan Pérez García">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="direccion">Dirección *</label>
+                        <input type="text" id="direccion" required placeholder="Ej: Av. Arce 2345, La Paz">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="telefono">Teléfono *</label>
+                        <input type="tel" id="telefono" required placeholder="Ej: +591 2 2234567">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="email">Email *</label>
+                        <input type="email" id="email" required placeholder="Ej: juan.perez@email.com">
+                    </div>
+
+                    <div style="margin-top: 25px;">
+                        <button type="submit" class="btn btn-primary" id="btnSubmit">
+                            ➕ Agregar Contacto
+                        </button>
+                        <button type="button" class="btn btn-secondary" id="btnCancel" style="display:none;">
+                            ❌ Cancelar
+                        </button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Panel de Lista -->
+            <div class="list-panel">
+                <h2>📋 Lista de Contactos</h2>
+
+                <div class="search-box">
+                    <input type="text" id="searchInput" placeholder="🔍 Buscar por nombre, dirección, teléfono o email...">
+                </div>
+
+                <div class="stats">
+                    <span>Total: <span id="totalContactos">0</span></span>
+                    <span>Mostrando: <span id="contactosMostrados">0</span></span>
+                </div>
+
+                <div id="contactosList">
+                    <div class="loading">Cargando contactos</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        $(document).ready(function() {
+            let contactosData = [];
+            let editingId = null;
+
+            // Cargar contactos al inicio
+            loadContactos();
+
+            // Submit del formulario
+            $('#contactoForm').submit(function(e) {
+                e.preventDefault();
+
+                console.log('Form submitted. editingId:', editingId);
+
+                const contacto = {
+                    nombre: $('#nombre').val().trim(),
+                    direccion: $('#direccion').val().trim(),
+                    telefono: $('#telefono').val().trim(),
+                    email: $('#email').val().trim()
+                };
+
+                console.log('Datos del formulario:', contacto);
+
+                if (editingId) {
+                    console.log('Modo edición - llamando updateContacto');
+                    updateContacto(editingId, contacto);
+                } else {
+                    console.log('Modo agregar - llamando addContacto');
+                    addContacto(contacto);
+                }
+            });
+
+            // Cancelar edición
+            $('#btnCancel').click(function() {
+                resetForm();
+            });
+
+            // Búsqueda en tiempo real
+            $('#searchInput').on('keyup', function() {
+                const searchTerm = $(this).val().toLowerCase();
+                filterContactos(searchTerm);
+            });
+
+            // Función para cargar contactos
+            function loadContactos() {
+                $.ajax({
+                    url: '/api/contactos',
+                    method: 'GET',
+                    dataType: 'json',
+                    success: function(data) {
+                        contactosData = data;
+                        displayContactos(contactosData);
+                        updateStats(contactosData.length, contactosData.length);
+                        console.log('Contactos cargados:', data.length);
+                    },
+                    error: function(xhr, status, error) {
+                        showError('Error al cargar contactos: ' + error);
+                        $('#contactosList').html(
+                            '<div class="empty-state">' +
+                            '<div class="empty-state-icon">⚠️</div>' +
+                            '<p>Error al cargar contactos</p>' +
+                            '</div>'
+                        );
+                    }
+                });
+            }
+
+            // Función para agregar contacto
+            function addContacto(contacto) {
+                $.ajax({
+                    url: '/api/contactos',
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify(contacto),
+                    success: function(response) {
+                        showSuccess('✅ Contacto agregado exitosamente');
+                        resetForm();
+                        loadContactos();
+                    },
+                    error: function(xhr, status, error) {
+                        showError('❌ Error al agregar contacto: ' + error);
+                    }
+                });
+            }
+
+            // Función para actualizar contacto
+            function updateContacto(id, contacto) {
+                console.log('Actualizando contacto ID:', id);
+                console.log('Datos a enviar:', contacto);
+
+                $.ajax({
+                    url: '/api/contactos/' + id,
+                    method: 'PUT',
+                    contentType: 'application/json',
+                    data: JSON.stringify(contacto),
+                    success: function(response) {
+                        console.log('Respuesta del servidor:', response);
+                        showSuccess('✅ Contacto actualizado exitosamente');
+                        resetForm();
+                        loadContactos();
+                    },
+                    error: function(xhr, status, error) {
+                        console.error('Error al actualizar:', xhr.responseText);
+                        showError('❌ Error al actualizar contacto: ' + error);
+                    }
+                });
+            }
+
+            // Función para eliminar contacto
+            function deleteContacto(id, nombre) {
+                if (!confirm('¿Está seguro de eliminar el contacto "' + nombre + '"?')) {
+                    return;
+                }
+
+                $.ajax({
+                    url: '/api/contactos/' + id,
+                    method: 'DELETE',
+                    success: function(response) {
+                        showSuccess('✅ Contacto eliminado exitosamente');
+                        loadContactos();
+                    },
+                    error: function(xhr, status, error) {
+                        showError('❌ Error al eliminar contacto: ' + error);
+                    }
+                });
+            }
+
+            // Función para editar contacto
+            function editContacto(id) {
+                console.log('Editando contacto con ID:', id);
+                console.log('Contactos disponibles:', contactosData);
+
+                const contacto = contactosData.find(c => String(c.id) === String(id));
+                if (!contacto) {
+                    console.error('Contacto no encontrado con ID:', id);
+                    showError('Contacto no encontrado');
+                    return;
+                }
+
+                console.log('Contacto encontrado:', contacto);
+
+                editingId = String(id);
+                $('#contactoId').val(id);
+                $('#nombre').val(contacto.nombre);
+                $('#direccion').val(contacto.direccion);
+                $('#telefono').val(contacto.telefono);
+                $('#email').val(contacto.email);
+
+                $('#btnSubmit').html('💾 Actualizar Contacto');
+                $('#btnCancel').show();
+                $('#editMode').show();
+
+                // Scroll al formulario
+                $('html, body').animate({
+                    scrollTop: $('.form-panel').offset().top - 20
+                }, 500);
+            }
+
+            // Resetear formulario
+            function resetForm() {
+                editingId = null;
+                $('#contactoForm')[0].reset();
+                $('#contactoId').val('');
+                $('#btnSubmit').html('➕ Agregar Contacto');
+                $('#btnCancel').hide();
+                $('#editMode').hide();
+            }
+
+            // Mostrar contactos
+            function displayContactos(contactos) {
+                const $list = $('#contactosList');
+                $list.empty();
+
+                if (contactos.length === 0) {
+                    $list.html(
+                        '<div class="empty-state">' +
+                        '<div class="empty-state-icon">📭</div>' +
+                        '<p>No hay contactos registrados</p>' +
+                        '<p style="font-size:14px; margin-top:10px;">Agregue su primer contacto usando el formulario</p>' +
+                        '</div>'
+                    );
+                    return;
+                }
+
+                const $grid = $('<div class="contactos-grid"></div>');
+
+                contactos.forEach(function(contacto) {
+                    const $card = $(`
+                        <div class="contacto-card">
+                            <h3>${escapeHtml(contacto.nombre)}</h3>
+                            <div class="contacto-info direccion">${escapeHtml(contacto.direccion)}</div>
+                            <div class="contacto-info telefono">${escapeHtml(contacto.telefono)}</div>
+                            <div class="contacto-info email">
+                                <a href="mailto:${escapeHtml(contacto.email)}" style="color:white;">
+                                    ${escapeHtml(contacto.email)}
+                                </a>
+                            </div>
+                            <div class="contacto-actions">
+                                <button class="btn btn-edit" data-id="${escapeHtml(contacto.id)}">
+                                    ✏️ Editar
+                                </button>
+                                <button class="btn btn-danger" data-id="${escapeHtml(contacto.id)}" data-nombre="${escapeHtml(contacto.nombre)}">
+                                    🗑️ Eliminar
+                                </button>
+                            </div>
+                        </div>
+                    `);
+
+                    $card.find('.btn-edit').click(function() {
+                        const clickedId = $(this).data('id');
+                        console.log('Click en editar, ID del botón:', clickedId);
+                        editContacto(clickedId);
+                    });
+
+                    $card.find('.btn-danger').click(function() {
+                        deleteContacto($(this).data('id'), $(this).data('nombre'));
+                    });
+
+                    $grid.append($card);
+                });
+
+                $list.append($grid);
+
+                // Animación de entrada
+                $('.contacto-card').hide().each(function(index) {
+                    $(this).delay(index * 50).fadeIn(300);
+                });
+            }
+
+            // Filtrar contactos
+            function filterContactos(searchTerm) {
+                if (searchTerm === '') {
+                    displayContactos(contactosData);
+                    updateStats(contactosData.length, contactosData.length);
+                } else {
+                    const filtered = contactosData.filter(c =>
+                        c.nombre.toLowerCase().includes(searchTerm) ||
+                        c.direccion.toLowerCase().includes(searchTerm) ||
+                        c.telefono.toLowerCase().includes(searchTerm) ||
+                        c.email.toLowerCase().includes(searchTerm)
+                    );
+                    displayContactos(filtered);
+                    updateStats(contactosData.length, filtered.length);
+                }
+            }
+
+            // Actualizar estadísticas
+            function updateStats(total, showing) {
+                $('#totalContactos').text(total);
+                $('#contactosMostrados').text(showing);
+            }
+
+            // Mostrar mensaje de éxito
+            function showSuccess(message) {
+                const $alert = $('#alertSuccess');
+                $alert.text(message).fadeIn();
+                setTimeout(() => $alert.fadeOut(), 4000);
+            }
+
+            // Mostrar mensaje de error
+            function showError(message) {
+                const $alert = $('#alertError');
+                $alert.text(message).fadeIn();
+                setTimeout(() => $alert.fadeOut(), 5000);
+            }
+
+            // Escape HTML
+            function escapeHtml(text) {
+                if (!text) return '';
+                return $('<div>').text(text).html();
+            }
+
+            // Recargar cada 30 segundos (opcional)
+            // setInterval(loadContactos, 30000);
+        });
+    </script>
+</body>
+</html>
+

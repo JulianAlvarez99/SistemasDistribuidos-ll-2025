@@ -13,6 +13,11 @@
               <option value="9709720e-97d0-4aef-9df3-c1153cba6cf5" />
               <option value="7897f00e-5e61-4ad3-a6cc-9c230ef85edb" />
               <option value="7a291e07-08d9-456f-8521-5d40c02aebdd" />
+              <option value="8f0042f8-ba58-42c3-900d-79ffad766af8" />
+              <option value="de53870a-536f-4eeb-8c85-5d3ec37a8759" />
+              <option value="32188ad3-8bd4-4ba3-9e06-7825dad36137" />
+              <option value="38baf964-e324-4c4c-81bd-c4209754188c" />
+              <option value="38ac6897-ed3e-40b6-ba3a-d3b810c6a726" />
             </set>
           </value>
         </entry>
@@ -39,6 +44,20 @@
           <option value="file://$PROJECT_DIR$/GUIA4/src/404.html" />
           <option value="file://$PROJECT_DIR$/GUIA4/ARQUITECTURA.md" />
           <option value="file://$PROJECT_DIR$/GUIA4/REFACTORIZACION.md" />
+          <option value="file://$PROJECT_DIR$/GUIA4-PT2-JQUERY/src/MultiThreadedHttpServer.java" />
+          <option value="file://$PROJECT_DIR$/GUIA4-PT2-JQUERY/src/ajax-jquery.html" />
+          <option value="file://$PROJECT_DIR$/GUIA4-PT2-JQUERY/src/login.html" />
+          <option value="file://$PROJECT_DIR$/GUIA4-PT2-JQUERY/src/index.html" />
+          <option value="file://$PROJECT_DIR$/GUIA4-PT2-JQUERY/src/404.html" />
+          <option value="file://$PROJECT_DIR$/GUIA4-PT2-JQUERY/GUIA4-PT2-JQUERY.iml" />
+          <option value="file://$PROJECT_DIR$/GUIA4-PT2-JQUERY/README.md" />
+          <option value="file://$PROJECT_DIR$/GUIA4-PT2-JQUERY/src/comparacion.html" />
+          <option value="file://$PROJECT_DIR$/GUIA4-PT2-JQUERY/src/agenda.xml" />
+          <option value="file://$PROJECT_DIR$/GUIA4-PT2-JQUERY/src/agenda.html" />
+          <option value="file://$PROJECT_DIR$/GUIA4-PT2-AGENDA/src/AgendaServer.java" />
+          <option value="file://$PROJECT_DIR$/GUIA4-PT2-AGENDA/src/index.html" />
+          <option value="file://$PROJECT_DIR$/GUIA4-PT2-AGENDA/GUIA4-PT2-AGENDA.iml" />
+          <option value="file://$PROJECT_DIR$/GUIA4-PT2-AGENDA/README.md" />
         </set>
       </entry>
     </pendingWorkingSetItems>

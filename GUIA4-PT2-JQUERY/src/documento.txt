@@ -1,0 +1,7 @@
+Este es un archivo de texto de ejemplo que será cargado dinámicamente mediante AJAX.
+
+El contenido de este archivo se mostrará dentro de un elemento <div> sin recargar la página completa.
+
+AJAX (Asynchronous JavaScript and XML) permite realizar solicitudes HTTP asíncronas desde JavaScript, actualizando partes específicas de la página sin necesidad de recargarla completamente.
+
+Este patrón es fundamental en aplicaciones web modernas y sistemas distribuidos basados en HTTP.

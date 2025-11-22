@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Comparación: Vanilla JS vs jQuery</title>
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <style>
+        body {
+            font-family: 'Courier New', monospace;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 30px;
+        }
+        .container {
+            background: #252526;
+            padding: 30px;
+            border-radius: 8px;
+            max-width: 1200px;
+            margin: 20px auto;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+        }
+        h1 {
+            color: #4CAF50;
+            text-align: center;
+        }
+        h2 {
+            color: #2196F3;
+            border-bottom: 2px solid #2196F3;
+            padding-bottom: 10px;
+        }
+        .comparison {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin: 20px 0;
+        }
+        .code-block {
+            background: #1e1e1e;
+            padding: 20px;
+            border-radius: 4px;
+            border-left: 4px solid #007acc;
+        }
+        .code-block.jquery {
+            border-left-color: #4CAF50;
+        }
+        .code-block h3 {
+            margin-top: 0;
+            color: #569cd6;
+        }
+        pre {
+            margin: 0;
+            overflow-x: auto;
+        }
+        .keyword { color: #569cd6; }
+        .string { color: #ce9178; }
+        .function { color: #dcdcaa; }
+        .comment { color: #6a9955; }
+        .number { color: #b5cea8; }
+        .stats {
+            background: #2d2d30;
+            padding: 15px;
+            border-radius: 4px;
+            margin-top: 20px;
+        }
+        .stat-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid #3e3e42;
+        }
+        .stat-item:last-child {
+            border-bottom: none;
+        }
+        .vanilla { color: #ff6b6b; }
+        .jquery-text { color: #4CAF50; }
+        .winner {
+            background: #4CAF50;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>⚡ Vanilla JavaScript vs jQuery AJAX</h1>
+        <p style="text-align:center; color:#888;">Comparación lado a lado de las 3 funcionalidades</p>
+    </div>
+
+    <div class="container">
+        <h2>📄 Funcionalidad A: Cargar documento.txt</h2>
+        <div class="comparison">
+            <div class="code-block">
+                <h3>Vanilla JavaScript (XMLHttpRequest)</h3>
+                <pre><code><span class="keyword">var</span> xhr = <span class="keyword">new</span> <span class="function">XMLHttpRequest</span>();
+xhr.<span class="function">onreadystatechange</span> = <span class="keyword">function</span>() {
+    <span class="keyword">if</span> (xhr.readyState == <span class="number">4</span> && xhr.status == <span class="number">200</span>) {
+        <span class="keyword">document</span>.<span class="function">getElementById</span>(<span class="string">'content'</span>)
+            .innerHTML = xhr.responseText
+                .<span class="function">replace</span>(<span class="string">/\n/g</span>, <span class="string">'&lt;br&gt;'</span>);
+    }
+};
+xhr.<span class="function">open</span>(<span class="string">'GET'</span>, <span class="string">'/documento.txt'</span>, <span class="keyword">true</span>);
+xhr.<span class="function">send</span>();
+
+<span class="comment">// Líneas: 10</span>
+<span class="comment">// Sin manejo de errores</span></code></pre>
+            </div>
+            <div class="code-block jquery">
+                <h3>jQuery <span class="winner">GANADOR</span></h3>
+                <pre><code>$.<span class="function">ajax</span>({
+    url: <span class="string">'/documento.txt'</span>,
+    method: <span class="string">'GET'</span>,
+    dataType: <span class="string">'text'</span>,
+    success: <span class="keyword">function</span>(data) {
+        $(<span class="string">'#content'</span>).<span class="function">html</span>(data.<span class="function">replace</span>(<span class="string">/\n/g</span>, <span class="string">'&lt;br&gt;'</span>));
+    },
+    error: <span class="keyword">function</span>(xhr, status, error) {
+        $(<span class="string">'#content'</span>).<span class="function">html</span>(<span class="string">'Error: '</span> + error);
+    }
+});
+
+<span class="comment">// Líneas: 11 (con manejo de errores)</span></code></pre>
+            </div>
+        </div>
+
+        <div class="stats">
+            <div class="stat-item">
+                <span>Líneas de código:</span>
+                <span><span class="vanilla">Vanilla: 10</span> | <span class="jquery-text">jQuery: 11</span></span>
+            </div>
+            <div class="stat-item">
+                <span>Manejo de errores:</span>
+                <span><span class="vanilla">❌ No</span> | <span class="jquery-text">✅ Sí</span></span>
+            </div>
+            <div class="stat-item">
+                <span>Legibilidad:</span>
+                <span><span class="vanilla">Media</span> | <span class="jquery-text">Alta</span></span>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <h2>🌍 Funcionalidad B: Cargar paises.txt (HTML)</h2>
+        <div class="comparison">
+            <div class="code-block">
+                <h3>Vanilla JavaScript</h3>
+                <pre><code><span class="keyword">var</span> xhr = <span class="keyword">new</span> <span class="function">XMLHttpRequest</span>();
+xhr.<span class="function">onreadystatechange</span> = <span class="keyword">function</span>() {
+    <span class="keyword">if</span> (xhr.readyState == <span class="number">4</span> && xhr.status == <span class="number">200</span>) {
+        <span class="keyword">document</span>.<span class="function">getElementById</span>(<span class="string">'countriesHTML'</span>)
+            .innerHTML = xhr.responseText;
+    }
+};
+xhr.<span class="function">open</span>(<span class="string">'GET'</span>, <span class="string">'/paises.txt'</span>, <span class="keyword">true</span>);
+xhr.<span class="function">send</span>();
+
+<span class="comment">// Líneas: 8</span></code></pre>
+            </div>
+            <div class="code-block jquery">
+                <h3>jQuery <span class="winner">GANADOR</span></h3>
+                <pre><code>$.<span class="function">get</span>(<span class="string">'/paises.txt'</span>, <span class="keyword">function</span>(data) {
+    $(<span class="string">'#countriesHTML'</span>).<span class="function">html</span>(data);
+}).<span class="function">fail</span>(<span class="keyword">function</span>(error) {
+    <span class="keyword">console</span>.<span class="function">error</span>(<span class="string">'Error:'</span>, error);
+});
+
+<span class="comment">// Líneas: 5 (50% menos código)</span></code></pre>
+            </div>
+        </div>
+
+        <div class="stats">
+            <div class="stat-item">
+                <span>Líneas de código:</span>
+                <span><span class="vanilla">Vanilla: 8</span> | <span class="jquery-text">jQuery: 5 (-37.5%)</span></span>
+            </div>
+            <div class="stat-item">
+                <span>Sintaxis:</span>
+                <span><span class="vanilla">Verbosa</span> | <span class="jquery-text">Concisa</span></span>
+            </div>
+            <div class="stat-item">
+                <span>Método usado:</span>
+                <span><span class="vanilla">XMLHttpRequest</span> | <span class="jquery-text">$.get()</span></span>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <h2>📊 Funcionalidad C: Cargar paises.json</h2>
+        <div class="comparison">
+            <div class="code-block">
+                <h3>Vanilla JavaScript</h3>
+                <pre><code><span class="keyword">var</span> xhr = <span class="keyword">new</span> <span class="function">XMLHttpRequest</span>();
+xhr.<span class="function">onreadystatechange</span> = <span class="keyword">function</span>() {
+    <span class="keyword">if</span> (xhr.readyState == <span class="number">4</span> && xhr.status == <span class="number">200</span>) {
+        <span class="keyword">var</span> countries = <span class="function">JSON.parse</span>(xhr.responseText);
+        <span class="keyword">var</span> select = <span class="keyword">document</span>.<span class="function">getElementById</span>(<span class="string">'countriesJSON'</span>);
+        select.innerHTML = <span class="string">'&lt;option&gt;Seleccione&lt;/option&gt;'</span>;
+        countries.<span class="function">forEach</span>(<span class="keyword">function</span>(c) {
+            select.innerHTML += <span class="string">'&lt;option value="'</span> + c.code +
+                              <span class="string">'"&gt;'</span> + c.name + <span class="string">'&lt;/option&gt;'</span>;
+        });
+    }
+};
+xhr.<span class="function">open</span>(<span class="string">'GET'</span>, <span class="string">'/paises.json'</span>, <span class="keyword">true</span>);
+xhr.<span class="function">send</span>();
+
+<span class="comment">// Líneas: 14</span>
+<span class="comment">// Requiere JSON.parse() manual</span></code></pre>
+            </div>
+            <div class="code-block jquery">
+                <h3>jQuery <span class="winner">GANADOR</span></h3>
+                <pre><code>$.<span class="function">getJSON</span>(<span class="string">'/paises.json'</span>, <span class="keyword">function</span>(countries) {
+    <span class="keyword">var</span> $select = $(<span class="string">'#countriesJSON'</span>);
+    $select.<span class="function">empty</span>().<span class="function">append</span>(<span class="string">'&lt;option&gt;Seleccione&lt;/option&gt;'</span>);
+
+    $.<span class="function">each</span>(countries, <span class="keyword">function</span>(i, c) {
+        $select.<span class="function">append</span>(
+            $(<span class="string">'&lt;option&gt;&lt;/option&gt;'</span>).<span class="function">val</span>(c.code).<span class="function">text</span>(c.name)
+        );
+    });
+}).<span class="function">fail</span>(<span class="keyword">function</span>(error) {
+    <span class="keyword">console</span>.<span class="function">error</span>(<span class="string">'Error:'</span>, error);
+});
+
+<span class="comment">// Líneas: 12 (parseo automático)</span></code></pre>
+            </div>
+        </div>
+
+        <div class="stats">
+            <div class="stat-item">
+                <span>Líneas de código:</span>
+                <span><span class="vanilla">Vanilla: 14</span> | <span class="jquery-text">jQuery: 12 (-14%)</span></span>
+            </div>
+            <div class="stat-item">
+                <span>JSON Parsing:</span>
+                <span><span class="vanilla">Manual (JSON.parse)</span> | <span class="jquery-text">Automático</span></span>
+            </div>
+            <div class="stat-item">
+                <span>Método usado:</span>
+                <span><span class="vanilla">XMLHttpRequest</span> | <span class="jquery-text">$.getJSON()</span></span>
+            </div>
+            <div class="stat-item">
+                <span>DOM Manipulation:</span>
+                <span><span class="vanilla">innerHTML +=</span> | <span class="jquery-text">.append() (más seguro)</span></span>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <h2>📈 Resumen Comparativo</h2>
+        <div class="stats">
+            <div class="stat-item">
+                <span><strong>Total líneas de código:</strong></span>
+                <span><span class="vanilla">Vanilla: 32 líneas</span> | <span class="jquery-text">jQuery: 28 líneas (-12.5%)</span></span>
+            </div>
+            <div class="stat-item">
+                <span><strong>Compatibilidad cross-browser:</strong></span>
+                <span><span class="vanilla">Requiere polyfills</span> | <span class="jquery-text">Incluido</span></span>
+            </div>
+            <div class="stat-item">
+                <span><strong>Manejo de errores:</strong></span>
+                <span><span class="vanilla">Manual en cada caso</span> | <span class="jquery-text">Integrado (.fail)</span></span>
+            </div>
+            <div class="stat-item">
+                <span><strong>Curva de aprendizaje:</strong></span>
+                <span><span class="vanilla">Media-Alta</span> | <span class="jquery-text">Baja</span></span>
+            </div>
+            <div class="stat-item">
+                <span><strong>Legibilidad:</strong></span>
+                <span><span class="vanilla">★★★☆☆</span> | <span class="jquery-text">★★★★★</span></span>
+            </div>
+            <div class="stat-item">
+                <span><strong>Mantenibilidad:</strong></span>
+                <span><span class="vanilla">★★★☆☆</span> | <span class="jquery-text">★★★★★</span></span>
+            </div>
+            <div class="stat-item">
+                <span><strong>Productividad:</strong></span>
+                <span><span class="vanilla">★★★☆☆</span> | <span class="jquery-text">★★★★★</span></span>
+            </div>
+        </div>
+    </div>
+
+    <div class="container" style="text-align:center; background:#4CAF50; color:white;">
+        <h2 style="color:white; border:none;">🏆 Conclusión</h2>
+        <p style="font-size:18px;">jQuery reduce el código en promedio <strong>12.5%</strong>, mejora la legibilidad, incluye manejo de errores integrado y garantiza compatibilidad cross-browser.</p>
+        <p><strong>Ventaja principal:</strong> Desarrollo más rápido y código más mantenible.</p>
+    </div>
+
+</body>
+</html>
+

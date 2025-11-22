@@ -1,0 +1,3 @@
+admin|admin123|Administrator
+jdoe|pass987|Jane Doe
+testuser|test|Test User

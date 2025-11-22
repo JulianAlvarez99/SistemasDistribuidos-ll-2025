@@ -1,0 +1,12 @@
+<option value="">Seleccione un país</option>
+<option value="AR">Argentina</option>
+<option value="BO">Bolivia</option>
+<option value="BR">Brasil</option>
+<option value="CL">Chile</option>
+<option value="CO">Colombia</option>
+<option value="EC">Ecuador</option>
+<option value="PY">Paraguay</option>
+<option value="PE">Perú</option>
+<option value="UY">Uruguay</option>
+<option value="VE">Venezuela</option>
+

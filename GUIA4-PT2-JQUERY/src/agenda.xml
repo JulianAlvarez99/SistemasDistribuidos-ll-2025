@@ -1,0 +1,59 @@
+<!DOCTYPE agenda [
+<!ELEMENT agenda (contacto)*>
+<!ELEMENT contacto (nombre,direccion,telefono,email)>
+<!ELEMENT nombre (#PCDATA)>
+<!ELEMENT direccion (#PCDATA)>
+<!ELEMENT telefono (#PCDATA)>
+<!ELEMENT email (#PCDATA)>
+]>
+<agenda>
+    <contacto>
+        <nombre>Juan Pérez García</nombre>
+        <direccion>Av. Arce 2345, La Paz, Bolivia</direccion>
+        <telefono>+591 2 2234567</telefono>
+        <email>juan.perez@email.com</email>
+    </contacto>
+    <contacto>
+        <nombre>María López Fernández</nombre>
+        <direccion>Calle Comercio 789, Santa Cruz, Bolivia</direccion>
+        <telefono>+591 3 3456789</telefono>
+        <email>maria.lopez@email.com</email>
+    </contacto>
+    <contacto>
+        <nombre>Carlos Mendoza Ríos</nombre>
+        <direccion>Av. América 1234, Cochabamba, Bolivia</direccion>
+        <telefono>+591 4 4567890</telefono>
+        <email>carlos.mendoza@email.com</email>
+    </contacto>
+    <contacto>
+        <nombre>Ana Rodríguez Silva</nombre>
+        <direccion>Calle Ballivián 567, La Paz, Bolivia</direccion>
+        <telefono>+591 2 2345678</telefono>
+        <email>ana.rodriguez@email.com</email>
+    </contacto>
+    <contacto>
+        <nombre>Luis Torrez Gutiérrez</nombre>
+        <direccion>Av. Cristo Redentor 890, Santa Cruz, Bolivia</direccion>
+        <telefono>+591 3 3567891</telefono>
+        <email>luis.torrez@email.com</email>
+    </contacto>
+    <contacto>
+        <nombre>Patricia Vargas Campos</nombre>
+        <direccion>Calle España 456, Sucre, Bolivia</direccion>
+        <telefono>+591 4 6453210</telefono>
+        <email>patricia.vargas@email.com</email>
+    </contacto>
+    <contacto>
+        <nombre>Roberto Flores Mamani</nombre>
+        <direccion>Av. 6 de Agosto 321, La Paz, Bolivia</direccion>
+        <telefono>+591 2 2456789</telefono>
+        <email>roberto.flores@email.com</email>
+    </contacto>
+    <contacto>
+        <nombre>Sofía Quispe Condori</nombre>
+        <direccion>Calle Potosí 654, Oruro, Bolivia</direccion>
+        <telefono>+591 2 5234567</telefono>
+        <email>sofia.quispe@email.com</email>
+    </contacto>
+</agenda>
+
