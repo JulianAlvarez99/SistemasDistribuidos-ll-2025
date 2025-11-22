@@ -1,4 +1,5 @@
 import java.io.BufferedReader;
+import java.io.File;
 import java.io.FileReader;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
@@ -9,34 +10,70 @@ import java.nio.charset.StandardCharsets;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 /**
- * A multi-threaded HTTP server that handles:
- * GET /login (serves login form)
- * POST /login (validates credentials against users.txt)
- * GET / (default time page)
+ * Multi-threaded HTTP server with thread pool.
+ * Routes: GET /login, POST /login, GET /
+ * Validates credentials against users.txt
  */
 public class MultiThreadedHttpServer {
 
-    // Define the user data file
+    private static final int PORT = 8080;
+    private static final int THREAD_POOL_SIZE = 10;
     private static final String USER_FILE = "C:/Users/julia/IdeaProjects/SistemasDistribuidos-ll-2025/GUIA4/src/users.txt";
 
+    private static volatile boolean running = true;
+    private static ExecutorService threadPool;
+
     public static void main(String[] args) {
-        int port = 8080;
+        threadPool = Executors.newFixedThreadPool(THREAD_POOL_SIZE);
 
-        // Assumption: Port 8080 is available.
-        // Assumption: users.txt exists in the server's working directory.
-        try (ServerSocket serverSocket = new ServerSocket(port)) {
-            System.out.println("Server listening on port " + port);
-            System.out.println("Access the login form at: http://localhost:8080/login");
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            System.out.println("\nShutting down server...");
+            running = false;
+            shutdownThreadPool();
+        }));
 
-            while (true) {
-                Socket clientSocket = serverSocket.accept();
-                Thread clientThread = new Thread(new ClientHandler(clientSocket));
-                clientThread.start();
+        File userFile = new File(USER_FILE);
+        if (!userFile.exists()) {
+            System.err.println("ERROR: users.txt not found at: " + userFile.getAbsolutePath());
+            System.exit(1);
+        }
+
+        try (ServerSocket serverSocket = new ServerSocket(PORT)) {
+            serverSocket.setSoTimeout(1000);
+            System.out.println("Server listening on port " + PORT);
+            System.out.println("User file: " + userFile.getAbsolutePath());
+            System.out.println("Access: http://localhost:" + PORT + "/login");
+
+            while (running) {
+                try {
+                    Socket clientSocket = serverSocket.accept();
+                    threadPool.execute(new ClientHandler(clientSocket));
+                } catch (java.net.SocketTimeoutException e) {
+                    // Normal timeout, check if still running
+                }
             }
         } catch (Exception e) {
-            System.err.println("Server exception: " + e.getMessage());
+            System.err.println("Server error: " + e.getMessage());
+        } finally {
+            shutdownThreadPool();
+        }
+    }
+
+    private static void shutdownThreadPool() {
+        if (threadPool != null && !threadPool.isShutdown()) {
+            threadPool.shutdown();
+            try {
+                if (!threadPool.awaitTermination(5, TimeUnit.SECONDS)) {
+                    threadPool.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                threadPool.shutdownNow();
+            }
         }
     }
 
@@ -49,16 +86,19 @@ public class MultiThreadedHttpServer {
 
         @Override
         public void run() {
+            String clientAddr = clientSocket.getInetAddress().getHostAddress();
+
             try (
-                    PrintWriter out = new PrintWriter(clientSocket.getOutputStream(), true);
-                    BufferedReader in = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()))
+                PrintWriter out = new PrintWriter(clientSocket.getOutputStream(), true);
+                BufferedReader in = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()))
             ) {
                 String requestLine = in.readLine();
                 if (requestLine == null || requestLine.isEmpty()) {
                     return;
                 }
 
-                // Read headers to find Content-Length for POST
+                System.out.println("[" + clientAddr + "] " + requestLine);
+
                 Map<String, String> headers = new HashMap<>();
                 String headerLine;
                 while ((headerLine = in.readLine()) != null && !headerLine.isEmpty()) {
@@ -74,29 +114,27 @@ public class MultiThreadedHttpServer {
                 if (requestLine.startsWith("POST")) {
                     int contentLength = 0;
                     if (headers.containsKey("content-length")) {
-                        contentLength = Integer.parseInt(headers.get("content-length"));
+                        try {
+                            contentLength = Integer.parseInt(headers.get("content-length"));
+                        } catch (NumberFormatException e) {
+                            sendBadRequest(out);
+                            return;
+                        }
                     }
 
-                    if (contentLength > 0) {
+                    if (contentLength > 0 && contentLength < 10000) {
                         char[] bodyChars = new char[contentLength];
-                        in.read(bodyChars, 0, contentLength);
-                        body = new String(bodyChars);
+                        int read = in.read(bodyChars, 0, contentLength);
+                        if (read > 0) {
+                            body = new String(bodyChars, 0, read);
+                        }
                     }
                 }
 
-                // --- Routing ---
-                if (requestLine.startsWith("GET /login")) {
-                    sendLoginForm(out);
-                } else if (requestLine.startsWith("POST /login")) {
-                    handleLogin(out, body);
-                } else if (requestLine.startsWith("GET /")) {
-                    sendDefaultPage(out);
-                } else {
-                    sendNotFoundResponse(out);
-                }
+                route(out, requestLine, body, clientAddr);
 
             } catch (Exception e) {
-                // System.err.println("Handler exception: " + e.getMessage());
+                System.err.println("[" + clientAddr + "] Error: " + e.getMessage());
             } finally {
                 try {
                     clientSocket.close();
@@ -104,83 +142,111 @@ public class MultiThreadedHttpServer {
             }
         }
 
-        /**
-         * Sends the HTML login form.
-         */
-        private void sendLoginForm(PrintWriter out) {
-            String html = "<html><body>" +
-                    "<h2>Login</h2>" +
-                    "<form action='/login' method='POST'>" +
-                    "  <label for='username'>Usuario:</label><br>" +
-                    "  <input type='text' id='username' name='username'><br>" +
-                    "  <label for='password'>Contrasena:</label><br>" +
-                    "  <input type='password' id='password' name='password'><br><br>" +
-                    "  <input type='submit' value='Enviar'>" +
-                    "</form>" +
-                    "</body></html>";
-            sendHttpResponse(out, "200 OK", "text/html", html);
+        private void sendBadRequest(PrintWriter out) {
+            String html = "<!DOCTYPE html><html><head>" +
+                    "<meta charset='UTF-8'><title>400 Bad Request</title>" +
+                    "</head><body><h1>400 Bad Request</h1></body></html>";
+            sendHttpResponse(out, "400 Bad Request", "text/html", html);
         }
 
-        /**
-         * Handles the POST request from the login form.
-         */
-        private void handleLogin(PrintWriter out, String body) {
+        private void route(PrintWriter out, String requestLine, String body, String clientAddr) {
+            if (requestLine.startsWith("GET /login.html")) {
+                serveFile(out, "login.html", "text/html");
+            } else if (requestLine.startsWith("GET /ajax.html")) {
+                serveFile(out, "ajax.html", "text/html");
+            } else if (requestLine.startsWith("GET /index.html")) {
+                serveFile(out, "index.html", "text/html");
+            } else if (requestLine.startsWith("POST /login")) {
+                handleLogin(out, body, clientAddr);
+            } else if (requestLine.startsWith("GET /documento.txt")) {
+                serveFile(out, "documento.txt", "text/plain");
+            } else if (requestLine.startsWith("GET /paises.txt")) {
+                serveFile(out, "paises.txt", "text/html");
+            } else if (requestLine.startsWith("GET /paises.json")) {
+                serveFile(out, "paises.json", "application/json");
+            } else if (requestLine.startsWith("GET / ") || requestLine.startsWith("GET / HTTP")) {
+                serveFile(out, "index.html", "text/html");
+            } else {
+                serveFile(out, "404.html", "text/html");
+            }
+        }
+
+        private void handleLogin(PrintWriter out, String body, String clientAddr) {
             Map<String, String> formData = parseFormData(body);
             String username = formData.getOrDefault("username", "");
             String password = formData.getOrDefault("password", "");
 
+            System.out.println("[" + clientAddr + "] Login attempt: " + username);
+
             String fullName = validateUser(username, password);
 
             if (fullName != null) {
-                // Success
-                String html = "<html><body>" +
-                        "<h1>Bienvenido, " + fullName + "</h1>" +
-                        "<a href='/login'>Volver al login</a>" +
-                        "</body></html>";
+                System.out.println("[" + clientAddr + "] Login successful: " + fullName);
+                String html = "<!DOCTYPE html><html><head>" +
+                        "<meta charset='UTF-8'><title>Bienvenido</title>" +
+                        "<style>" +
+                        "body{font-family:Arial,sans-serif;background:#f4f4f4;padding:50px;text-align:center;}" +
+                        ".container{background:white;padding:40px;border-radius:8px;max-width:500px;margin:auto;box-shadow:0 2px 10px rgba(0,0,0,0.1);}" +
+                        "h1{color:#4CAF50;}" +
+                        "a{display:inline-block;margin-top:20px;padding:10px 20px;background:#4CAF50;color:white;text-decoration:none;border-radius:4px;}" +
+                        "a:hover{background:#45a049;}" +
+                        "</style>" +
+                        "</head><body><div class='container'>" +
+                        "<h1>Bienvenido, " + escapeHtml(fullName) + "</h1>" +
+                        "<p>Has iniciado sesión correctamente.</p>" +
+                        "<a href='/login.html'>Cerrar Sesión</a>" +
+                        "</div></body></html>";
                 sendHttpResponse(out, "200 OK", "text/html", html);
             } else {
-                // Failure
-                String html = "<html><body>" +
-                        "<h1>Error: Usuario o contrasena incorrectos.</h1>" +
-                        "<a href='/login'>Intentar nuevamente</a>" +
-                        "</body></html>";
-                // 401 Unauthorized is semantically correct
+                System.out.println("[" + clientAddr + "] Login failed: " + username);
+                String html = "<!DOCTYPE html><html><head>" +
+                        "<meta charset='UTF-8'><title>Error</title>" +
+                        "<style>" +
+                        "body{font-family:Arial,sans-serif;background:#f4f4f4;padding:50px;text-align:center;}" +
+                        ".container{background:white;padding:40px;border-radius:8px;max-width:500px;margin:auto;box-shadow:0 2px 10px rgba(0,0,0,0.1);}" +
+                        "h1{color:#f44336;}" +
+                        "a{display:inline-block;margin-top:20px;padding:10px 20px;background:#4CAF50;color:white;text-decoration:none;border-radius:4px;}" +
+                        "a:hover{background:#45a049;}" +
+                        "</style>" +
+                        "</head><body><div class='container'>" +
+                        "<h1>Error de Autenticación</h1>" +
+                        "<p>Usuario o contraseña incorrectos.</p>" +
+                        "<a href='/login.html'>Intentar Nuevamente</a>" +
+                        "</div></body></html>";
                 sendHttpResponse(out, "401 Unauthorized", "text/html", html);
             }
         }
 
-        /**
-         * Validates credentials against the users.txt file.
-         * Returns full name on success, null on failure.
-         */
+        private String escapeHtml(String text) {
+            if (text == null) return "";
+            return text.replace("&", "&amp;")
+                       .replace("<", "&lt;")
+                       .replace(">", "&gt;")
+                       .replace("\"", "&quot;")
+                       .replace("'", "&#x27;");
+        }
+
         private String validateUser(String username, String password) {
-            // This is not efficient for large files, but meets the requirement.
             try (BufferedReader fileReader = new BufferedReader(new FileReader(USER_FILE))) {
                 String line;
                 while ((line = fileReader.readLine()) != null) {
-                    // Split by "|"
                     String[] parts = line.split("\\|");
-
                     if (parts.length == 3) {
-                        String fileUser = parts[0];
-                        String filePass = parts[1];
-                        String fileFullName = parts[2];
+                        String fileUser = parts[0].trim();
+                        String filePass = parts[1].trim();
+                        String fileFullName = parts[2].trim();
 
                         if (fileUser.equals(username) && filePass.equals(password)) {
-                            return fileFullName; // Match found
+                            return fileFullName;
                         }
                     }
                 }
             } catch (Exception e) {
-                System.err.println("Could not read user file: " + e.getMessage());
-                return null;
+                System.err.println("Error reading user file: " + e.getMessage());
             }
-            return null; // No match
+            return null;
         }
 
-        /**
-         * Utility to parse x-www-form-urlencoded data.
-         */
         private Map<String, String> parseFormData(String body) {
             Map<String, String> params = new HashMap<>();
             if (body == null || body.isEmpty()) {
@@ -192,38 +258,45 @@ public class MultiThreadedHttpServer {
                 for (String pair : pairs) {
                     int idx = pair.indexOf("=");
                     if (idx > 0) {
-                        String key = URLDecoder.decode(pair.substring(0, idx), StandardCharsets.UTF_8.name());
-                        String value = URLDecoder.decode(pair.substring(idx + 1), StandardCharsets.UTF_8.name());
+                        String key = URLDecoder.decode(pair.substring(0, idx), StandardCharsets.UTF_8);
+                        String value = URLDecoder.decode(pair.substring(idx + 1), StandardCharsets.UTF_8);
                         params.put(key, value);
                     }
                 }
             } catch (Exception e) {
-                // Handle decoding exception
+                System.err.println("Form data parsing error: " + e.getMessage());
             }
             return params;
         }
 
-        // --- Standard Responses (from previous exercise or new) ---
+        private void serveFile(PrintWriter out, String filename, String contentType) {
+            String filePath = USER_FILE.substring(0, USER_FILE.lastIndexOf('/') + 1) + filename;
+            StringBuilder content = new StringBuilder();
 
-        private void sendDefaultPage(PrintWriter out) {
-            String html = "<html><body><h1>Server Time</h1><p>" + new Date() + "</p>" +
-                    "<a href='/login'>Ir al Login</a></body></html>";
-            sendHttpResponse(out, "200 OK", "text/html", html);
+            try (BufferedReader reader = new BufferedReader(new FileReader(filePath))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    content.append(line).append("\n");
+                }
+                String responseContent = content.toString();
+                if (responseContent.endsWith("\n")) {
+                    responseContent = responseContent.substring(0, responseContent.length() - 1);
+                }
+                sendHttpResponse(out, "200 OK", contentType, responseContent);
+            } catch (Exception e) {
+                System.err.println("Error reading file " + filename + ": " + e.getMessage());
+                String errorHtml = "<!DOCTYPE html><html><head><meta charset='UTF-8'><title>404 Not Found</title></head>" +
+                        "<body><h1>File not found: " + filename + "</h1></body></html>";
+                sendHttpResponse(out, "404 Not Found", "text/html", errorHtml);
+            }
         }
 
-        private void sendNotFoundResponse(PrintWriter out) {
-            String html = "<html><body><h1>404 Not Found</h1></body></html>";
-            sendHttpResponse(out, "404 Not Found", "text/html", html);
-        }
-
-        /**
-         * Helper utility to send a complete HTTP response.
-         */
         private void sendHttpResponse(PrintWriter out, String status, String contentType, String body) {
             byte[] bodyBytes = body.getBytes(StandardCharsets.UTF_8);
             out.println("HTTP/1.1 " + status);
             out.println("Content-Type: " + contentType + "; charset=utf-8");
             out.println("Content-Length: " + bodyBytes.length);
+            out.println("Access-Control-Allow-Origin: *");
             out.println("Connection: close");
             out.println();
             out.print(body);

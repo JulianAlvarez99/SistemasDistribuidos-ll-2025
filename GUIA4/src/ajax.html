@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>AJAX Demo</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f4f4f4;
+            padding: 30px;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            max-width: 800px;
+            margin: 20px auto;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h2 {
+            color: #333;
+            border-bottom: 2px solid #4CAF50;
+            padding-bottom: 10px;
+        }
+        button {
+            padding: 10px 20px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 10px 5px;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        #content {
+            border: 1px solid #ddd;
+            padding: 15px;
+            border-radius: 4px;
+            background: #f9f9f9;
+            min-height: 100px;
+            margin-top: 15px;
+        }
+        select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin-top: 10px;
+        }
+        .nav {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .nav a {
+            display: inline-block;
+            margin: 0 10px;
+            padding: 10px 20px;
+            background: #2196F3;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+        }
+        .nav a:hover {
+            background: #0b7dda;
+        }
+    </style>
+</head>
+<body>
+    <div class="nav">
+        <a href="/">Inicio</a>
+        <a href="/login.html">Login</a>
+        <a href="/ajax.html">AJAX Demo</a>
+    </div>
+
+    <div class="container">
+        <h2>a) Cargar archivo de texto con AJAX</h2>
+        <button onclick="loadDocument()">Cargar documento.txt</button>
+        <div id="content"></div>
+    </div>
+
+    <div class="container">
+        <h2>b) Cargar países desde HTML (paises.txt)</h2>
+        <button onclick="loadCountriesHTML()">Cargar países HTML</button>
+        <select id="countriesHTML" size="5"></select>
+    </div>
+
+    <div class="container">
+        <h2>c) Cargar países desde JSON (paises.json)</h2>
+        <button onclick="loadCountriesJSON()">Cargar países JSON</button>
+        <select id="countriesJSON" size="5"></select>
+    </div>
+
+    <script>
+        function loadDocument() {
+            var xhr = new XMLHttpRequest();
+            xhr.onreadystatechange = function() {
+                if (xhr.readyState == 4 && xhr.status == 200) {
+                    document.getElementById('content').innerHTML = xhr.responseText.replace(/\n/g, '<br>');
+                }
+            };
+            xhr.open('GET', '/documento.txt', true);
+            xhr.send();
+        }
+
+        function loadCountriesHTML() {
+            var xhr = new XMLHttpRequest();
+            xhr.onreadystatechange = function() {
+                if (xhr.readyState == 4 && xhr.status == 200) {
+                    document.getElementById('countriesHTML').innerHTML = xhr.responseText;
+                }
+            };
+            xhr.open('GET', '/paises.txt', true);
+            xhr.send();
+        }
+
+        function loadCountriesJSON() {
+            var xhr = new XMLHttpRequest();
+            xhr.onreadystatechange = function() {
+                if (xhr.readyState == 4 && xhr.status == 200) {
+                    var countries = JSON.parse(xhr.responseText);
+                    var select = document.getElementById('countriesJSON');
+                    select.innerHTML = '<option value="">Seleccione un país</option>';
+                    countries.forEach(function(c) {
+                        select.innerHTML += '<option value="' + c.code + '">' + c.name + '</option>';
+                    });
+                }
+            };
+            xhr.open('GET', '/paises.json', true);
+            xhr.send();
+        }
+    </script>
+</body>
+</html>
+

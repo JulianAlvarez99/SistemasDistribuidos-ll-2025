@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="AgentMigrationStateService">
+    <option name="pendingSessionIds">
+      <option value="7ccf7d92-e2ec-4da2-9c77-58cee99f022b" />
+    </option>
+    <option name="pendingTurns">
+      <map>
+        <entry key="7ccf7d92-e2ec-4da2-9c77-58cee99f022b">
+          <value>
+            <set>
+              <option value="211e0431-e0ac-4f66-9f3d-3ee016405149" />
+              <option value="9709720e-97d0-4aef-9df3-c1153cba6cf5" />
+              <option value="7897f00e-5e61-4ad3-a6cc-9c230ef85edb" />
+              <option value="7a291e07-08d9-456f-8521-5d40c02aebdd" />
+            </set>
+          </value>
+        </entry>
+      </map>
+    </option>
+    <pendingWorkingSetItems>
+      <entry key="7ccf7d92-e2ec-4da2-9c77-58cee99f022b">
+        <set>
+          <option value="file://$PROJECT_DIR$/GUIA4/src/MultiThreadedHttpServer.java" />
+          <option value="file://$PROJECT_DIR$/GUIA4/README.md" />
+          <option value="file://$PROJECT_DIR$/GUIA4/src/documento.txt" />
+          <option value="file://$PROJECT_DIR$/GUIA4/src/paises.txt" />
+          <option value="file://$PROJECT_DIR$/GUIA4/src/paises.json" />
+          <option value="file://$PROJECT_DIR$/GUIA4/AJAX_README.md" />
+          <option value="file://$PROJECT_DIR$/GUIA4/start-server.bat" />
+          <option value="file://$PROJECT_DIR$/GUIA4/test-ajax.html" />
+          <option value="file://$PROJECT_DIR$/GUIA4/test-endpoints.bat" />
+          <option value="file://$PROJECT_DIR$/GUIA4/README_COMPLETO.md" />
+          <option value="file://$PROJECT_DIR$/GUIA4/VALIDACION.md" />
+          <option value="file://$PROJECT_DIR$/GUIA4/QUICK_START.md" />
+          <option value="file://$PROJECT_DIR$/GUIA4/src/login.html" />
+          <option value="file://$PROJECT_DIR$/GUIA4/src/ajax.html" />
+          <option value="file://$PROJECT_DIR$/GUIA4/src/index.html" />
+          <option value="file://$PROJECT_DIR$/GUIA4/src/404.html" />
+          <option value="file://$PROJECT_DIR$/GUIA4/ARQUITECTURA.md" />
+          <option value="file://$PROJECT_DIR$/GUIA4/REFACTORIZACION.md" />
+        </set>
+      </entry>
+    </pendingWorkingSetItems>
+  </component>
+</project>
