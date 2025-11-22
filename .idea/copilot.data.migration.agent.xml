@@ -18,6 +18,11 @@
               <option value="32188ad3-8bd4-4ba3-9e06-7825dad36137" />
               <option value="38baf964-e324-4c4c-81bd-c4209754188c" />
               <option value="38ac6897-ed3e-40b6-ba3a-d3b810c6a726" />
+              <option value="21a2f8b7-c541-4f68-8bcf-c0eb7f9719e4" />
+              <option value="613cf0f1-0f96-4331-8489-b5827bfe0d22" />
+              <option value="d6800bd0-32d2-4d4c-a761-5e24b209c47d" />
+              <option value="8ab4d0e7-e9e8-4ec5-b9d1-0d302f894418" />
+              <option value="11d5a79d-6e75-43a7-b2e0-ca06560e0a58" />
             </set>
           </value>
         </entry>
@@ -58,6 +63,14 @@
           <option value="file://$PROJECT_DIR$/GUIA4-PT2-AGENDA/src/index.html" />
           <option value="file://$PROJECT_DIR$/GUIA4-PT2-AGENDA/GUIA4-PT2-AGENDA.iml" />
           <option value="file://$PROJECT_DIR$/GUIA4-PT2-AGENDA/README.md" />
+          <option value="file://$PROJECT_DIR$/GUIA4-PT2-CHAT-WEBSOCKET/src/ChatWebSocketServer.java" />
+          <option value="file://$PROJECT_DIR$/GUIA4-PT2-CHAT-WEBSOCKET/GUIA4-PT2-CHAT-WEBSOCKET.iml" />
+          <option value="file://$PROJECT_DIR$/GUIA4-PT2-CHAT-WEBSOCKET/README.md" />
+          <option value="file://$PROJECT_DIR$/GUIA4-PT2-CHAT-WEBSOCKET/src/index.html" />
+          <option value="file://$PROJECT_DIR$/GUIA4-PT2-CHAT-WEBSOCKET/src/styles.css" />
+          <option value="file://$PROJECT_DIR$/GUIA4-PT2-CHAT-WEBSOCKET/src/client.js" />
+          <option value="file://$PROJECT_DIR$/GUIA4-PT2-CHAT-WEBSOCKET/src/ChatServer.java" />
+          <option value="file://$PROJECT_DIR$/GUIA4-PT2-CHAT-WEBSOCKET/README_MODULAR.md" />
         </set>
       </entry>
     </pendingWorkingSetItems>

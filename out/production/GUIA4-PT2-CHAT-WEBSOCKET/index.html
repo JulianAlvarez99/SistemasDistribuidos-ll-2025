@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset='UTF-8'>
+    <title>Chat WebSocket</title>
+    <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+    <div id='loginScreen' class='active'>
+        <h1>💬 Chat WebSocket</h1>
+        <input type='text' id='nicknameInput' placeholder='Ingrese su nickname' maxlength='20' />
+        <button onclick='join()'>Unirse al Chat</button>
+    </div>
+
+    <div id='chatScreen'>
+        <div id='chatContainer'>
+            <div id='userList'>
+                <h3>👥 Usuarios Conectados</h3>
+                <div id='users'></div>
+            </div>
+            <div id='chatArea'>
+                <div id='chatHeader'>
+                    <h2>💬 Chat en Tiempo Real</h2>
+                    <span id='userNickname'></span>
+                </div>
+                <div id='messages'></div>
+                <div id='inputArea'>
+                    <input type='text' id='messageInput' placeholder='Escribe un mensaje...' />
+                    <button id='sendButton' onclick='sendMessage()'>Enviar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/client.js"></script>
+</body>
+</html>
+
